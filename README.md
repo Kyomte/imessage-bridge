@@ -10,6 +10,8 @@ decisions and milestones.
 - M1 read-only viewer: server + web client.
 - M2 live updates: chat.db watcher + WebSocket (`/api/ws`); new messages, receipts,
   edits and unsends appear without reloading. The sidebar shows Live / Offline.
+- M3 sending text: composer in each thread; sends go through Messages.app via osascript
+  and are confirmed against chat.db (Sending… → real message, or Not Delivered + Retry).
 
 ## Layout
 

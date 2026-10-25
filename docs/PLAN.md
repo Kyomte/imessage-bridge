@@ -184,10 +184,10 @@ confirmed.
 
 | # | Milestone | Done when |
 |---|---|---|
-| M0 | Spike (go/no-go) | (a) decoder ≥99.9% on corpus ✅ 100%; (b) text send via osascript to an `any;-;` iMessage chat and an SMS chat; (c) image send to both, staging folder found; (d) watcher fires on incoming and iPhone-sent messages, latency measured |
+| M0 | Spike (go/no-go) | (a) decoder ≥99.9% on corpus ✅ 100%; (b) text send via osascript ✅ iMessage (`any;-;` ids confirmed), SMS pending a test recipient; (c) image send to both, staging folder found — with M5; (d) watcher ✅ live: 0.4 s when the row is already on the Mac, ~42 s once when iCloud was slow |
 | M1 | Read-only viewer | Pair → conversation list with contact names → paged history (text, groups included), at the ts.net HTTPS URL. Server + client built 2026-10-26; runs from the Claude Code session until M6 gives it its own FDA grant |
 | M2 | Real-time | Watcher + WS + resume; delivered/read/edited/unsent update live; iPhone-sent messages appear without refresh. Built 2026-10-26: 37 server tests + browser E2E on a synthetic chat.db (event→screen ~25 ms after detection; resume after server restart 1.3 s, no duplicates) |
-| M3 | Send text | Optimistic send, reconciliation, failure/retry, SMS + iMessage |
+| M3 | Send text | Optimistic send, reconciliation, failure/retry, SMS + iMessage. Built 2026-10-26: 49 server tests + browser E2E with a fake Messages.app; real iMessage send to self confirmed (request → matched chat.db row in ~1 s). AppleScript lists only loaded chats, so older 1:1 chats send via participant on the iMessage/SMS account (verified read-only). Real SMS and group sends not yet exercised |
 | M4 | Receive attachments | Inline images/thumbs, video, file download, missing-file placeholder |
 | M5 | Send attachments | Upload → stage → send → reconcile → cleanup after delivery |
 | M6 | Tray app + service | Tauri tray app (pairing, autostart, toasts), server as LaunchAgent single binary, health page |
