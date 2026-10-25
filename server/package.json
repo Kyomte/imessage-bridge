@@ -1,0 +1,17 @@
+{
+  "name": "@imb/server",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "setup": "node scripts/setup.ts",
+    "start": "node src/main.ts",
+    "dev": "node --watch src/main.ts",
+    "test": "node --test 'test/**/*.test.ts'",
+    "typecheck": "tsc --noEmit -p ."
+  },
+  "dependencies": {
+    "@fastify/static": "^10.1.7",
+    "fastify": "^5.12.7",
+    "libphonenumber-js": "^1.13.15"
+  }
+}

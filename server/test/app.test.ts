@@ -1,0 +1,81 @@
+import { test, after } from 'node:test';
+import assert from 'node:assert/strict';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { buildApp } from '../src/app.ts';
+import { DEFAULTS, type Config } from '../src/config.ts';
+import { hashPassword } from '../src/passwords.ts';
+import { Store } from '../src/store.ts';
+import type { ChatDb } from '../src/chatdb/index.ts';
+import type { Contacts } from '../src/contacts.ts';
+
+const dir = mkdtempSync(join(tmpdir(), 'imb-app-'));
+after(() => rmSync(dir, { recursive: true, force: true }));
+
+const config: Config = {
+  ...DEFAULTS,
+  passwordHash: hashPassword('right-password'),
+  tailscaleLogin: 'me@example.com',
+  defaultRegion: 'PH',
+};
+const chatDb = {
+  listConversations: () => [],
+  getConversation: () => null,
+  lastRowId: () => 1,
+} as unknown as ChatDb;
+const contacts = { count: 0 } as unknown as Contacts;
+const app = buildApp({ config, chatDb, contacts, store: new Store(dir), logger: false });
+
+test('ping is public', async () => {
+  const res = await app.inject({ url: '/api/ping' });
+  assert.equal(res.statusCode, 200);
+});
+
+test('API routes require a device token', async () => {
+  assert.equal((await app.inject({ url: '/api/conversations' })).statusCode, 401);
+  const bad = await app.inject({ url: '/api/conversations', headers: { authorization: 'Bearer nope' } });
+  assert.equal(bad.statusCode, 401);
+});
+
+test('pairing rejects a wrong password', async () => {
+  const res = await app.inject({ method: 'POST', url: '/api/auth/pair', payload: { password: 'wrong' } });
+  assert.equal(res.statusCode, 401);
+});
+
+test('pairing issues a token that unlocks the API', async () => {
+  const pair = await app.inject({
+    method: 'POST',
+    url: '/api/auth/pair',
+    payload: { password: 'right-password', deviceName: 'test' },
+  });
+  assert.equal(pair.statusCode, 200);
+  const { token } = pair.json();
+  const res = await app.inject({ url: '/api/conversations', headers: { authorization: `Bearer ${token}` } });
+  assert.equal(res.statusCode, 200);
+  assert.deepEqual(res.json(), []);
+
+  const missing = await app.inject({
+    url: '/api/conversations/nope/messages',
+    headers: { authorization: `Bearer ${token}` },
+  });
+  assert.equal(missing.statusCode, 404);
+});
+
+test('a different tailnet login is rejected even with a valid token', async () => {
+  const pair = await app.inject({ method: 'POST', url: '/api/auth/pair', payload: { password: 'right-password' } });
+  const res = await app.inject({
+    url: '/api/conversations',
+    headers: { authorization: `Bearer ${pair.json().token}`, 'tailscale-user-login': 'someone-else@example.com' },
+  });
+  assert.equal(res.statusCode, 403);
+});
+
+test('pairing is rate limited after repeated failures', async () => {
+  const statuses: number[] = [];
+  for (let i = 0; i < 6; i++) {
+    const res = await app.inject({ method: 'POST', url: '/api/auth/pair', payload: { password: `wrong-${i}` } });
+    statuses.push(res.statusCode);
+  }
+  assert.equal(statuses.at(-1), 429);
+});

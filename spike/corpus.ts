@@ -8,7 +8,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { decodeAttributedBody } from './decode.ts';
+import { decodeAttributedBody } from '../server/src/chatdb/decode.ts';
 
 const referencePath = process.argv[2];
 if (!referencePath) {
