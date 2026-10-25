@@ -12,6 +12,7 @@ import { Contacts } from '../src/contacts.ts';
 import { hashPassword } from '../src/passwords.ts';
 import { Store } from '../src/store.ts';
 import { Watcher } from '../src/watcher.ts';
+import { Sender } from '../src/sender.ts';
 import { FakeChatDb } from './fixtures/fake-chatdb.ts';
 
 const fake = new FakeChatDb();
@@ -23,7 +24,14 @@ const contacts = new Contacts('/nonexistent', 'PH');
 const chatDb = new ChatDb(fake.path, contacts, 'PH');
 const watcher = new Watcher(chatDb);
 const config: Config = { ...DEFAULTS, passwordHash: hashPassword('pw'), tailscaleLogin: null, defaultRegion: 'PH' };
-const app = buildApp({ config, chatDb, contacts, store, watcher, logger: false });
+// Fake Messages.app: writing the row is what a real send causes.
+const sender = new Sender(watcher, {
+  run: async (_script, [, text]) => {
+    fake.addMessage(chat.chatRowId, { text, fromMe: true });
+    watcher.check();
+  },
+});
+const app = buildApp({ config, chatDb, contacts, store, watcher, sender, logger: false });
 const { token } = store.createDevice('test');
 let url: string;
 
@@ -117,4 +125,40 @@ test('revoking a device closes its sockets', async () => {
   });
   assert.equal(res.statusCode, 200);
   assert.equal(await c.closed, CLOSE_UNAUTHORIZED);
+});
+
+test('send endpoint validates input', async () => {
+  const auth = { authorization: `Bearer ${token}` };
+  const url = `/api/conversations/${encodeURIComponent(chat.guid)}/messages`;
+  const post = (payload: unknown, path = url) => app.inject({ method: 'POST', url: path, headers: auth, payload: payload as object });
+  assert.equal((await post({ text: '   ', clientId: 'client-aaaa' })).statusCode, 400);
+  assert.equal((await post({ text: 'x'.repeat(4001), clientId: 'client-aaaa' })).statusCode, 400);
+  assert.equal((await post({ text: 'hi', clientId: 'bad id!' })).statusCode, 400);
+  assert.equal((await post({ text: 'hi', clientId: 'client-aaaa' }, '/api/conversations/nope/messages')).statusCode, 404);
+});
+
+test('a send is accepted and its status streams over the socket', async () => {
+  const c = connect();
+  await c.opened;
+  c.socket.send(JSON.stringify({ type: 'auth', token }));
+  await c.next('hello');
+
+  const res = await app.inject({
+    method: 'POST',
+    url: `/api/conversations/${encodeURIComponent(chat.guid)}/messages`,
+    headers: { authorization: `Bearer ${token}` },
+    payload: { text: 'sent from windows', clientId: 'client-bbbb' },
+  });
+  assert.equal(res.statusCode, 202);
+  assert.equal(res.json().state, 'queued');
+
+  const states: string[] = [];
+  for (let i = 0; i < 2; i++) {
+    const event = await c.next('send.status');
+    if (event.type === 'send.status') states.push(event.status.state);
+  }
+  assert.deepEqual(states, ['sending', 'sent']);
+  const created = await c.next('message.new');
+  assert.equal(created.type === 'message.new' && created.message.text, 'sent from windows');
+  c.socket.close();
 });

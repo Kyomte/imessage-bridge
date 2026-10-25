@@ -10,6 +10,7 @@ import { Store } from '../src/store.ts';
 import type { ChatDb } from '../src/chatdb/index.ts';
 import type { Contacts } from '../src/contacts.ts';
 import type { Watcher } from '../src/watcher.ts';
+import type { Sender } from '../src/sender.ts';
 
 const dir = mkdtempSync(join(tmpdir(), 'imb-app-'));
 after(async () => {
@@ -30,7 +31,8 @@ const chatDb = {
 } as unknown as ChatDb;
 const contacts = { count: 0 } as unknown as Contacts;
 const watcher = { subscribe: () => () => {}, lastRowId: 0 } as unknown as Watcher;
-const app = buildApp({ config, chatDb, contacts, store: new Store(dir), watcher, logger: false });
+const sender = { subscribe: () => () => {} } as unknown as Sender;
+const app = buildApp({ config, chatDb, contacts, store: new Store(dir), watcher, sender, logger: false });
 
 test('ping is public', async () => {
   const res = await app.inject({ url: '/api/ping' });

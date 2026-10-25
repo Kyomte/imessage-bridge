@@ -4,6 +4,7 @@ import { Contacts } from './contacts.ts';
 import { ChatDb } from './chatdb/index.ts';
 import { Store } from './store.ts';
 import { Watcher } from './watcher.ts';
+import { Sender } from './sender.ts';
 import { buildApp } from './app.ts';
 
 const config = loadConfig();
@@ -11,9 +12,13 @@ const contacts = new Contacts(config.addressBookDir, config.defaultRegion);
 const chatDb = new ChatDb(config.chatDbPath, contacts, config.defaultRegion);
 const store = new Store(DATA_DIR);
 const watcher = new Watcher(chatDb);
+const sender = new Sender(watcher);
 const clientDir = fileURLToPath(new URL('../../client/dist', import.meta.url));
 
-const app = buildApp({ config, chatDb, contacts, store, watcher, clientDir });
+const app = buildApp({ config, chatDb, contacts, store, watcher, sender, clientDir });
+
+// Metadata only: never the text or recipient.
+sender.subscribe((status) => app.log.info({ state: status.state, error: status.error }, 'send'));
 
 // Metadata only: counts, latency and which trigger fired, never content.
 watcher.subscribe((events) => {

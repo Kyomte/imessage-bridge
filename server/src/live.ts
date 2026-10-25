@@ -31,6 +31,7 @@ export interface LiveDeps {
 
 export interface Live {
   clientCount(): number;
+  broadcast(event: ServerEvent): void;
   disconnectDevice(deviceId: number): void;
 }
 
@@ -127,6 +128,9 @@ export function registerLive(app: FastifyInstance, { chatDb, store, watcher, all
 
   return {
     clientCount: () => clients.size,
+    broadcast(event) {
+      for (const socket of clients.keys()) send(socket, event);
+    },
     disconnectDevice(deviceId) {
       for (const [socket, client] of clients) {
         if (client.deviceId === deviceId) socket.close(CLOSE_UNAUTHORIZED, 'device revoked');

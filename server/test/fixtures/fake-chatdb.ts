@@ -38,9 +38,12 @@ export class FakeChatDb {
     `);
   }
 
-  addChat(handleId: string, opts: { service?: string } = {}): { chatRowId: number; guid: string; handleRowId: number } {
+  addChat(
+    handleId: string,
+    opts: { service?: string; guid?: string } = {},
+  ): { chatRowId: number; guid: string; handleRowId: number } {
     const handleRowId = Number(this.#db.prepare('INSERT INTO handle (id) VALUES (?)').run(handleId).lastInsertRowid);
-    const guid = `any;-;${handleId}`;
+    const guid = opts.guid ?? `any;-;${handleId}`;
     const chatRowId = Number(
       this.#db
         .prepare('INSERT INTO chat (guid, style, service_name, chat_identifier) VALUES (?, 45, ?, ?)')
@@ -83,6 +86,10 @@ export class FakeChatDb {
 
   edit(rowId: number, text: string, at = Date.now()) {
     this.#db.prepare('UPDATE message SET text = ?, date_edited = ? WHERE ROWID = ?').run(text, appleNs(at), rowId);
+  }
+
+  setError(rowId: number, error = 22) {
+    this.#db.prepare('UPDATE message SET error = ? WHERE ROWID = ?').run(error, rowId);
   }
 
   close() {

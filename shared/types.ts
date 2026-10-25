@@ -89,6 +89,28 @@ export interface Health {
   liveClients: number;
 }
 
+/**
+ * Progress of a send from this app. 'sending' covers the osascript call and the wait
+ * for Messages to write the row; 'unconfirmed' means no row showed up in time (the
+ * message may still have gone out).
+ */
+export type SendState = 'queued' | 'sending' | 'sent' | 'failed' | 'unconfirmed';
+
+export interface SendStatus {
+  clientId: string;
+  conversationId: string;
+  state: SendState;
+  /** guid of the chat.db message once matched. */
+  messageId: string | null;
+  error: string | null;
+}
+
+export interface SendRequest {
+  text: string;
+  /** Client-generated id; resending the same id doesn't send twice. */
+  clientId: string;
+}
+
 // WebSocket protocol at /api/ws. The client authenticates with its first frame,
 // because a browser WebSocket can't send an Authorization header.
 
@@ -97,6 +119,7 @@ export type ServerEvent =
   | { type: 'message.new'; message: Message }
   | { type: 'message.updated'; message: Message }
   | { type: 'conversation.updated'; conversation: ConversationSummary }
+  | { type: 'send.status'; status: SendStatus }
   /** Too much was missed to replay; refetch everything. */
   | { type: 'resync' };
 

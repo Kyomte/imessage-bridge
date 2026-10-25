@@ -10,6 +10,7 @@ import {
   type ServerEvent,
 } from '@imb/shared';
 import { setToken } from './api.ts';
+import { applySendStatus, settle } from './outbox.ts';
 
 export type LiveStatus = 'connecting' | 'live' | 'offline';
 
@@ -33,6 +34,11 @@ export function applyNewMessage(client: QueryClient, message: Message) {
     const messages = [...newest.messages, message].sort(chronological);
     return { ...data, pages: [{ ...newest, messages }, ...older] };
   });
+}
+
+function inCache(client: QueryClient, conversationId: string, messageId: string): boolean {
+  const data = client.getQueryData<Pages>(['messages', conversationId]);
+  return !!data?.pages.some((p) => p.messages.some((m) => m.id === messageId));
 }
 
 export function applyUpdatedMessage(client: QueryClient, message: Message) {
@@ -81,8 +87,18 @@ export function connectLive(client: QueryClient, token: string, onStatus: (statu
         break;
       case 'message.new':
         applyNewMessage(client, event.message);
+        settle(client, event.message.id);
         lastRowId = Math.max(lastRowId ?? 0, event.message.rowId);
         break;
+      case 'send.status': {
+        const { status } = event;
+        applySendStatus(client, status);
+        // The message can arrive before its status; then the pending copy is done.
+        if (status.messageId && inCache(client, status.conversationId, status.messageId)) {
+          settle(client, status.messageId);
+        }
+        break;
+      }
       case 'message.updated':
         applyUpdatedMessage(client, event.message);
         break;

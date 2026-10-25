@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react';
 import type { AttachmentInfo, Message } from '@imb/shared';
 import { clockTime, fileSize, sameDay, separatorTime } from '../format.ts';
+import type { PendingSend } from '../outbox.ts';
 
 // Messages shows a timestamp separator after an hour of silence.
 const GAP_MS = 60 * 60_000;
@@ -83,6 +84,48 @@ export function MessageRow({
       {body}
       {m.editedAt && !m.retracted && <div className="meta">Edited</div>}
       {showStatus && <div className="meta">{status(m)}</div>}
+    </div>
+  );
+}
+
+const PENDING_LABEL: Record<PendingSend['state'], string> = {
+  queued: 'Sending…',
+  sending: 'Sending…',
+  sent: 'Sent',
+  unconfirmed: 'Sent, but not confirmed. Check your phone.',
+  failed: 'Not Delivered',
+};
+
+/** A send from this device that chat.db hasn't confirmed yet. */
+export function PendingRow({
+  pending,
+  onRetry,
+  onRemove,
+}: {
+  pending: PendingSend;
+  onRetry: () => void;
+  onRemove: () => void;
+}) {
+  const tone = pending.service === 'iMessage' ? 'imessage' : 'sms';
+  const failed = pending.state === 'failed';
+  const inFlight = pending.state === 'queued' || pending.state === 'sending';
+  return (
+    <div className="message-row from-me run-start run-end">
+      <div className={`bubble ${tone} sensitive ${inFlight ? 'pending' : ''} ${failed ? 'failed' : ''}`}>{pending.text}</div>
+      <div className={`meta ${failed ? 'error' : ''}`} role={failed ? 'alert' : undefined}>
+        {PENDING_LABEL[pending.state]}
+        {failed && pending.error && pending.error !== 'Not delivered.' ? ` · ${pending.error}` : ''}
+      </div>
+      {failed && (
+        <div className="pending-actions">
+          <button type="button" onClick={onRetry}>
+            Retry
+          </button>
+          <button type="button" onClick={onRemove}>
+            Remove
+          </button>
+        </div>
+      )}
     </div>
   );
 }

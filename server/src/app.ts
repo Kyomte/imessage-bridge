@@ -2,12 +2,13 @@ import Fastify, { LogController, type FastifyInstance } from 'fastify';
 import fastifyStatic from '@fastify/static';
 import { execFileSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
-import type { Health, PairResponse } from '@imb/shared';
+import type { Health, PairResponse, SendRequest } from '@imb/shared';
 import type { Config } from './config.ts';
 import type { ChatDb } from './chatdb/index.ts';
 import type { Contacts } from './contacts.ts';
 import type { Device, Store } from './store.ts';
 import type { Watcher } from './watcher.ts';
+import type { Sender } from './sender.ts';
 import { verifyPassword } from './passwords.ts';
 import { registerLive } from './live.ts';
 
@@ -21,6 +22,8 @@ declare module 'fastify' {
 const PUBLIC_ROUTES = new Set(['/api/ping', '/api/auth/pair', '/api/ws']);
 const PAIR_WINDOW_MS = 5 * 60_000;
 const PAIR_MAX_FAILURES = 5;
+const MAX_TEXT_LENGTH = 4000;
+const SENDS_PER_MINUTE = 30;
 
 export interface AppDeps {
   config: Config;
@@ -28,11 +31,21 @@ export interface AppDeps {
   contacts: Contacts;
   store: Store;
   watcher: Watcher;
+  sender: Sender;
   clientDir?: string;
   logger?: boolean;
 }
 
-export function buildApp({ config, chatDb, contacts, store, watcher, clientDir, logger = true }: AppDeps): FastifyInstance {
+export function buildApp({
+  config,
+  chatDb,
+  contacts,
+  store,
+  watcher,
+  sender,
+  clientDir,
+  logger = true,
+}: AppDeps): FastifyInstance {
   // Request logging is our own (below) so URLs, which contain phone numbers, never hit the log.
   const app = Fastify({ logger, logController: new LogController({ disableRequestLogging: true }) });
 
@@ -58,6 +71,7 @@ export function buildApp({ config, chatDb, contacts, store, watcher, clientDir, 
   });
 
   const live = registerLive(app, { chatDb, store, watcher, allowedOrigins: config.allowedOrigins });
+  sender.subscribe((status) => live.broadcast({ type: 'send.status', status }));
 
   app.get('/api/ping', async () => ({ ok: true }));
 
@@ -126,6 +140,41 @@ export function buildApp({ config, chatDb, contacts, store, watcher, clientDir, 
         if (err instanceof Error && err.message === 'bad cursor') return reply.code(400).send({ error: 'bad cursor' });
         throw err;
       }
+    },
+  );
+
+  const recentSends: number[] = [];
+  app.post<{ Params: { id: string }; Body: Partial<SendRequest> }>(
+    '/api/conversations/:id/messages',
+    async (req, reply) => {
+      const conversation = chatDb.getConversation(req.params.id);
+      if (!conversation) return reply.code(404).send({ error: 'not found' });
+
+      const text = typeof req.body?.text === 'string' ? req.body.text.trim() : '';
+      const clientId = req.body?.clientId;
+      if (!text || text.length > MAX_TEXT_LENGTH) {
+        return reply.code(400).send({ error: `text is required (max ${MAX_TEXT_LENGTH} characters)` });
+      }
+      if (typeof clientId !== 'string' || !/^[\w-]{8,64}$/.test(clientId)) {
+        return reply.code(400).send({ error: 'clientId is required' });
+      }
+
+      // Guards against a client bug sending in a loop.
+      const now = Date.now();
+      while (recentSends.length && now - recentSends[0] > 60_000) recentSends.shift();
+      if (recentSends.length >= SENDS_PER_MINUTE) return reply.code(429).send({ error: 'too many sends' });
+      recentSends.push(now);
+
+      const status = sender.send(
+        {
+          conversationId: conversation.id,
+          handle: conversation.isGroup ? null : (conversation.participants[0]?.handle ?? null),
+          service: conversation.service,
+        },
+        text,
+        clientId,
+      );
+      return reply.code(202).send(status);
     },
   );
 

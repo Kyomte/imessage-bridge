@@ -51,7 +51,8 @@ body {
 }
 
 button,
-input {
+input,
+textarea {
   font: inherit;
   color: inherit;
 }
@@ -424,6 +425,90 @@ code {
   padding: 0 6px;
   color: var(--muted);
   font-size: 11px;
+}
+
+.bubble.pending {
+  opacity: 0.6;
+}
+
+.bubble.failed {
+  outline: 2px solid var(--error);
+  outline-offset: 1px;
+}
+
+.meta.error {
+  color: var(--error);
+}
+
+.pending-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.pending-actions button {
+  padding: 3px 10px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--bg);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.pending-actions button:hover {
+  background: var(--hover);
+}
+
+/* Composer */
+
+.composer {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  padding: 8px 12px 12px;
+  border-top: 1px solid var(--border);
+}
+
+.composer textarea {
+  flex: 1;
+  min-height: 34px;
+  max-height: 140px;
+  padding: 7px 14px;
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  background: var(--bg);
+  line-height: 1.35;
+  resize: none;
+  outline: none;
+}
+
+.composer textarea:focus {
+  border-color: var(--accent);
+}
+
+.send-button {
+  display: grid;
+  flex-shrink: 0;
+  width: 30px;
+  height: 30px;
+  margin-bottom: 2px;
+  place-items: center;
+  border: none;
+  border-radius: 50%;
+  color: #fff;
+  cursor: pointer;
+}
+
+.send-button.imessage {
+  background: var(--imessage);
+}
+
+.send-button.sms {
+  background: var(--sms);
+}
+
+.send-button:disabled {
+  opacity: 0.35;
+  cursor: default;
 }
 
 /* Pairing */

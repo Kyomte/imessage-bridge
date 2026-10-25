@@ -1,4 +1,4 @@
-import type { ConversationSummary, MessagePage, PairResponse } from '@imb/shared';
+import type { ConversationSummary, MessagePage, PairResponse, SendRequest, SendStatus } from '@imb/shared';
 
 // Empty for the web build (same origin); the Tauri app will point this at the ts.net URL.
 const BASE = import.meta.env.VITE_API_BASE ?? '';
@@ -57,4 +57,18 @@ export const api = {
     if (before) params.set('before', before);
     return request<MessagePage>(`/api/conversations/${encodeURIComponent(conversationId)}/messages?${params}`);
   },
+
+  send: (conversationId: string, body: SendRequest) =>
+    request<SendStatus>(`/api/conversations/${encodeURIComponent(conversationId)}/messages`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
 };
+
+/**
+ * Random id for idempotent sends. crypto.randomUUID() needs a secure context and the
+ * tailnet URL is plain HTTP, so build it from getRandomValues (available everywhere).
+ */
+export function newClientId(): string {
+  return Array.from(crypto.getRandomValues(new Uint8Array(16)), (b) => b.toString(16).padStart(2, '0')).join('');
+}
