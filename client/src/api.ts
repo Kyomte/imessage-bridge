@@ -1,4 +1,14 @@
-import type { ConversationSummary, MediaToken, MessagePage, PairResponse, SendRequest, SendStatus } from '@imb/shared';
+import {
+  NEEDS_FULL_DISK_ACCESS,
+  type AutomationState,
+  type ConversationSummary,
+  type Health,
+  type MediaToken,
+  type MessagePage,
+  type PairResponse,
+  type SendRequest,
+  type SendStatus,
+} from '@imb/shared';
 
 // Empty for the web build (same origin); the Tauri app will point this at the ts.net URL.
 const BASE = import.meta.env.VITE_API_BASE ?? '';
@@ -41,6 +51,9 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   }
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
+    if (res.status === 503 && body.error === NEEDS_FULL_DISK_ACCESS) {
+      window.dispatchEvent(new Event('imb:needs-full-disk-access'));
+    }
     throw new ApiError(res.status, body.error ?? res.statusText);
   }
   return res.json() as Promise<T>;
@@ -60,12 +73,30 @@ export const api = {
 
   mediaToken: () => request<MediaToken>('/api/media-token'),
 
+  health: () => request<Health>('/api/health'),
+
+  recheckAutomation: () =>
+    request<{ state: AutomationState; checkedAt: number | null }>('/api/health/automation', { method: 'POST' }),
+
+  me: () => request<Device>('/api/me'),
+
+  devices: () => request<Device[]>('/api/devices'),
+
+  revokeDevice: (id: number) => request<{ ok: true }>(`/api/devices/${id}`, { method: 'DELETE' }),
+
   send: (conversationId: string, body: SendRequest) =>
     request<SendStatus>(`/api/conversations/${encodeURIComponent(conversationId)}/messages`, {
       method: 'POST',
       body: JSON.stringify(body),
     }),
 };
+
+export interface Device {
+  id: number;
+  name: string;
+  createdAt: number;
+  lastSeenAt: number | null;
+}
 
 export type MediaVariant = 'thumb' | 'preview' | 'original';
 

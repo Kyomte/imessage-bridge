@@ -11,6 +11,7 @@ import {
 } from '@imb/shared';
 import { setToken } from './api.ts';
 import { applySendStatus, settle } from './outbox.ts';
+import { notifyIncoming } from './notify.ts';
 
 export type LiveStatus = 'connecting' | 'live' | 'offline';
 
@@ -97,6 +98,7 @@ export function connectLive(
       case 'message.new':
         applyNewMessage(client, event.message);
         settle(client, event.message.id);
+        void notifyIncoming(client, event.message);
         lastRowId = Math.max(lastRowId ?? 0, event.message.rowId);
         break;
       case 'send.status': {

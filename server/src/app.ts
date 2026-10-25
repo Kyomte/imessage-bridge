@@ -5,6 +5,8 @@ import { existsSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 import type { Health, MediaToken, PairResponse, SendRequest } from '@imb/shared';
+import type { FastifyServerOptions } from 'fastify';
+import type { AutomationCheck } from './automation.ts';
 import type { Config } from './config.ts';
 import type { ChatDb } from './chatdb/index.ts';
 import type { Contacts } from './contacts.ts';
@@ -37,8 +39,9 @@ export interface AppDeps {
   watcher: Watcher;
   sender: Sender;
   media: Media;
+  automation?: AutomationCheck;
   clientDir?: string;
-  logger?: boolean;
+  logger?: FastifyServerOptions['logger'];
 }
 
 export function buildApp({
@@ -49,6 +52,7 @@ export function buildApp({
   watcher,
   sender,
   media,
+  automation,
   clientDir,
   logger = true,
 }: AppDeps): FastifyInstance {
@@ -88,7 +92,10 @@ export function buildApp({
     allowedOrigins: config.allowedOrigins,
     clientBuild: () => (clientDir ? servedBundle(clientDir) : null),
   });
-  sender.subscribe((status) => live.broadcast({ type: 'send.status', status }));
+  sender.subscribe((status) => {
+    live.broadcast({ type: 'send.status', status });
+    if (status.error?.includes('Automation')) automation?.markDenied();
+  });
 
   app.get('/api/ping', async () => ({ ok: true }));
 
@@ -131,9 +138,17 @@ export function buildApp({
       chatDb: { ok, lastRowId },
       contacts: { count: contacts.count },
       messagesAppRunning: isMessagesRunning(),
+      automation: { state: automation?.state ?? 'unknown', checkedAt: automation?.checkedAt ?? null },
       watcher: watcher.stats,
       liveClients: live.clientCount(),
+      uptimeSeconds: Math.round(process.uptime()),
     };
+  });
+
+  // Re-runs the Messages permission check (e.g. after clicking Allow on the Mac).
+  app.post('/api/health/automation', async () => {
+    const state = (await automation?.check(10_000)) ?? 'unknown';
+    return { state, checkedAt: automation?.checkedAt ?? null };
   });
 
   app.get('/api/conversations', async () => chatDb.listConversations());

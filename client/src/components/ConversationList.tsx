@@ -34,11 +34,13 @@ export function ConversationList({
   onSelect,
   liveStatus,
   stale,
+  onOpenStatus,
 }: {
   selectedId: string | null;
   onSelect: (id: string) => void;
   liveStatus: LiveStatus;
   stale: boolean;
+  onOpenStatus: () => void;
 }) {
   const { data, isLoading, error } = useConversations();
   const [query, setQuery] = useState('');
@@ -54,9 +56,12 @@ export function ConversationList({
           value={query}
           onChange={(e) => setQuery(e.target.value)}
         />
-        <div className={`live-status ${liveStatus}`} role="status">
+        <div className={`live-status ${liveStatus}`}>
           <span className="live-dot" aria-hidden />
-          {STATUS_LABEL[liveStatus]}
+          <span role="status">{STATUS_LABEL[liveStatus]}</span>
+          <button type="button" className="link-button status-button" onClick={onOpenStatus}>
+            Status
+          </button>
         </div>
         {stale && (
           <div className="update-banner" role="status">

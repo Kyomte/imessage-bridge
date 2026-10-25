@@ -90,13 +90,21 @@ export interface WatcherStats {
   lastLatencyMs: number | null;
 }
 
+/** 'waiting': the macOS permission prompt is probably open on the Mac. */
+export type AutomationState = 'unknown' | 'checking' | 'granted' | 'denied' | 'waiting' | 'error';
+
 export interface Health {
   chatDb: { ok: boolean; lastRowId: number | null };
   contacts: { count: number };
   messagesAppRunning: boolean;
+  automation: { state: AutomationState; checkedAt: number | null };
   watcher: WatcherStats;
   liveClients: number;
+  uptimeSeconds: number;
 }
+
+/** Sent with 503 from every API route while the server can't read chat.db. */
+export const NEEDS_FULL_DISK_ACCESS = 'needs-full-disk-access';
 
 /**
  * Progress of a send from this app. 'sending' covers the osascript call and the wait
