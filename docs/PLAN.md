@@ -186,7 +186,7 @@ confirmed.
 |---|---|---|
 | M0 | Spike (go/no-go) | (a) decoder ≥99.9% on corpus ✅ 100%; (b) text send via osascript to an `any;-;` iMessage chat and an SMS chat; (c) image send to both, staging folder found; (d) watcher fires on incoming and iPhone-sent messages, latency measured |
 | M1 | Read-only viewer | Pair → conversation list with contact names → paged history (text, groups included), at the ts.net HTTPS URL. Server + client built 2026-10-26; runs from the Claude Code session until M6 gives it its own FDA grant |
-| M2 | Real-time | Watcher + WS + resume; delivered/read/edited/unsent update live; iPhone-sent messages appear without refresh |
+| M2 | Real-time | Watcher + WS + resume; delivered/read/edited/unsent update live; iPhone-sent messages appear without refresh. Built 2026-10-26: 37 server tests + browser E2E on a synthetic chat.db (event→screen ~25 ms after detection; resume after server restart 1.3 s, no duplicates) |
 | M3 | Send text | Optimistic send, reconciliation, failure/retry, SMS + iMessage |
 | M4 | Receive attachments | Inline images/thumbs, video, file download, missing-file placeholder |
 | M5 | Send attachments | Upload → stage → send → reconcile → cleanup after delivery |

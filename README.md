@@ -8,6 +8,8 @@ decisions and milestones.
 
 - M0 spike: decoder verified (100% vs NSUnarchiver); send tests pending.
 - M1 read-only viewer: server + web client.
+- M2 live updates: chat.db watcher + WebSocket (`/api/ws`); new messages, receipts,
+  edits and unsends appear without reloading. The sidebar shows Live / Offline.
 
 ## Layout
 

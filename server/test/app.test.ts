@@ -9,9 +9,13 @@ import { hashPassword } from '../src/passwords.ts';
 import { Store } from '../src/store.ts';
 import type { ChatDb } from '../src/chatdb/index.ts';
 import type { Contacts } from '../src/contacts.ts';
+import type { Watcher } from '../src/watcher.ts';
 
 const dir = mkdtempSync(join(tmpdir(), 'imb-app-'));
-after(() => rmSync(dir, { recursive: true, force: true }));
+after(async () => {
+  await app.close();
+  rmSync(dir, { recursive: true, force: true });
+});
 
 const config: Config = {
   ...DEFAULTS,
@@ -25,7 +29,8 @@ const chatDb = {
   lastRowId: () => 1,
 } as unknown as ChatDb;
 const contacts = { count: 0 } as unknown as Contacts;
-const app = buildApp({ config, chatDb, contacts, store: new Store(dir), logger: false });
+const watcher = { subscribe: () => () => {}, lastRowId: 0 } as unknown as Watcher;
+const app = buildApp({ config, chatDb, contacts, store: new Store(dir), watcher, logger: false });
 
 test('ping is public', async () => {
   const res = await app.inject({ url: '/api/ping' });

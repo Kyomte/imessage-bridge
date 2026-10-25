@@ -71,8 +71,41 @@ export interface PairResponse {
   deviceId: number;
 }
 
+export interface WatcherStats {
+  checks: number;
+  changes: number;
+  /** Which trigger noticed each change first. */
+  triggers: { fsevents: number; poll: number; manual: number };
+  lastChangeAt: number | null;
+  /** Detection time minus send time of the newest message in the last batch. */
+  lastLatencyMs: number | null;
+}
+
 export interface Health {
   chatDb: { ok: boolean; lastRowId: number | null };
   contacts: { count: number };
   messagesAppRunning: boolean;
+  watcher: WatcherStats;
+  liveClients: number;
 }
+
+// WebSocket protocol at /api/ws. The client authenticates with its first frame,
+// because a browser WebSocket can't send an Authorization header.
+
+export type ServerEvent =
+  | { type: 'hello'; lastRowId: number; serverTime: number }
+  | { type: 'message.new'; message: Message }
+  | { type: 'message.updated'; message: Message }
+  | { type: 'conversation.updated'; conversation: ConversationSummary }
+  /** Too much was missed to replay; refetch everything. */
+  | { type: 'resync' };
+
+export type ClientEvent =
+  | { type: 'auth'; token: string }
+  /** Replay messages newer than this rowId (after a reconnect). */
+  | { type: 'resume'; sinceRowId: number };
+
+/** WebSocket close codes used by the server. */
+export const CLOSE_UNAUTHORIZED = 4401;
+export const CLOSE_FORBIDDEN_ORIGIN = 4403;
+export const CLOSE_BAD_MESSAGE = 4400;

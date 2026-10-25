@@ -7,7 +7,9 @@ import type { Config } from './config.ts';
 import type { ChatDb } from './chatdb/index.ts';
 import type { Contacts } from './contacts.ts';
 import type { Device, Store } from './store.ts';
+import type { Watcher } from './watcher.ts';
 import { verifyPassword } from './passwords.ts';
+import { registerLive } from './live.ts';
 
 declare module 'fastify' {
   interface FastifyRequest {
@@ -15,7 +17,8 @@ declare module 'fastify' {
   }
 }
 
-const PUBLIC_ROUTES = new Set(['/api/ping', '/api/auth/pair']);
+// /api/ws authenticates with its first frame (see live.ts).
+const PUBLIC_ROUTES = new Set(['/api/ping', '/api/auth/pair', '/api/ws']);
 const PAIR_WINDOW_MS = 5 * 60_000;
 const PAIR_MAX_FAILURES = 5;
 
@@ -24,11 +27,12 @@ export interface AppDeps {
   chatDb: ChatDb;
   contacts: Contacts;
   store: Store;
+  watcher: Watcher;
   clientDir?: string;
   logger?: boolean;
 }
 
-export function buildApp({ config, chatDb, contacts, store, clientDir, logger = true }: AppDeps): FastifyInstance {
+export function buildApp({ config, chatDb, contacts, store, watcher, clientDir, logger = true }: AppDeps): FastifyInstance {
   // Request logging is our own (below) so URLs, which contain phone numbers, never hit the log.
   const app = Fastify({ logger, logController: new LogController({ disableRequestLogging: true }) });
 
@@ -53,6 +57,8 @@ export function buildApp({ config, chatDb, contacts, store, clientDir, logger = 
     req.device = device;
   });
 
+  const live = registerLive(app, { chatDb, store, watcher, allowedOrigins: config.allowedOrigins });
+
   app.get('/api/ping', async () => ({ ok: true }));
 
   const pairFailures: number[] = [];
@@ -76,7 +82,9 @@ export function buildApp({ config, chatDb, contacts, store, clientDir, logger = 
   app.get('/api/devices', async () => store.listDevices());
 
   app.delete<{ Params: { id: string } }>('/api/devices/:id', async (req, reply) => {
-    if (!store.revokeDevice(Number(req.params.id))) return reply.code(404).send({ error: 'not found' });
+    const id = Number(req.params.id);
+    if (!store.revokeDevice(id)) return reply.code(404).send({ error: 'not found' });
+    live.disconnectDevice(id);
     return { ok: true };
   });
 
@@ -88,7 +96,13 @@ export function buildApp({ config, chatDb, contacts, store, clientDir, logger = 
     } catch {
       ok = false;
     }
-    return { chatDb: { ok, lastRowId }, contacts: { count: contacts.count }, messagesAppRunning: isMessagesRunning() };
+    return {
+      chatDb: { ok, lastRowId },
+      contacts: { count: contacts.count },
+      messagesAppRunning: isMessagesRunning(),
+      watcher: watcher.stats,
+      liveClients: live.clientCount(),
+    };
   });
 
   app.get('/api/conversations', async () => chatDb.listConversations());

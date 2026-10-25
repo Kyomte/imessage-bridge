@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { getToken, setToken } from './api.ts';
+import { connectLive, type LiveStatus } from './live.ts';
 import { Pair } from './components/Pair.tsx';
 import { ConversationList } from './components/ConversationList.tsx';
 import { Thread } from './components/Thread.tsx';
@@ -25,7 +27,7 @@ export function App() {
       />
     );
   }
-  return <Main />;
+  return <Main token={token} />;
 }
 
 const selectionFromHash = () => {
@@ -33,8 +35,12 @@ const selectionFromHash = () => {
   return match ? decodeURIComponent(match[1]) : null;
 };
 
-function Main() {
+function Main({ token }: { token: string }) {
   const [selected, setSelected] = useState(selectionFromHash);
+  const [liveStatus, setLiveStatus] = useState<LiveStatus>('connecting');
+  const queryClient = useQueryClient();
+
+  useEffect(() => connectLive(queryClient, token, setLiveStatus), [queryClient, token]);
 
   useEffect(() => {
     const onHashChange = () => setSelected(selectionFromHash());
@@ -48,7 +54,7 @@ function Main() {
 
   return (
     <div className={`layout ${selected ? 'has-selection' : ''}`}>
-      <ConversationList selectedId={selected} onSelect={select} />
+      <ConversationList selectedId={selected} onSelect={select} liveStatus={liveStatus} />
       <main className="pane">
         {selected ? (
           <Thread key={selected} conversationId={selected} onBack={() => select(null)} />

@@ -4,7 +4,14 @@ import { Virtuoso } from 'react-virtuoso';
 import type { ConversationSummary } from '@imb/shared';
 import { api } from '../api.ts';
 import { listTime } from '../format.ts';
+import type { LiveStatus } from '../live.ts';
 import { Avatar } from './Avatar.tsx';
+
+const STATUS_LABEL: Record<LiveStatus, string> = {
+  connecting: 'Connecting…',
+  live: 'Live',
+  offline: 'Offline, reconnecting…',
+};
 
 export const useConversations = () => useQuery({ queryKey: ['conversations'], queryFn: api.conversations });
 
@@ -25,9 +32,11 @@ function matches(c: ConversationSummary, query: string): boolean {
 export function ConversationList({
   selectedId,
   onSelect,
+  liveStatus,
 }: {
   selectedId: string | null;
   onSelect: (id: string) => void;
+  liveStatus: LiveStatus;
 }) {
   const { data, isLoading, error } = useConversations();
   const [query, setQuery] = useState('');
@@ -43,6 +52,10 @@ export function ConversationList({
           value={query}
           onChange={(e) => setQuery(e.target.value)}
         />
+        <div className={`live-status ${liveStatus}`} role="status">
+          <span className="live-dot" aria-hidden />
+          {STATUS_LABEL[liveStatus]}
+        </div>
       </div>
       {isLoading && <div className="list-status">Loading conversations…</div>}
       {error && <div className="list-status error">Couldn't load conversations.</div>}
@@ -56,7 +69,10 @@ export function ConversationList({
             className={`conversation ${c.id === selectedId ? 'selected' : ''}`}
             onClick={() => onSelect(c.id)}
           >
-            {c.unreadCount > 0 && <span className="unread-dot" aria-label={`${c.unreadCount} unread`} />}
+            {/* The bridge can't mark messages read on the Mac, so just hide the dot for the open chat. */}
+            {c.unreadCount > 0 && c.id !== selectedId && (
+              <span className="unread-dot" aria-label={`${c.unreadCount} unread`} />
+            )}
             <Avatar name={c.title} group={c.isGroup} />
             <div className="conversation-body">
               <div className="conversation-top">

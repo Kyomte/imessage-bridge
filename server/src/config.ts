@@ -16,6 +16,8 @@ export interface Config {
   defaultRegion: string;
   chatDbPath: string;
   addressBookDir: string;
+  /** Extra origins allowed to open the live socket, e.g. the Tauri app's. */
+  allowedOrigins?: string[];
 }
 
 export const DEFAULTS = {

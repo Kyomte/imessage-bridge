@@ -25,6 +25,27 @@ const ms = (col: string) => `CASE WHEN ${col} > 0 THEN ${col} / 1000000 + ${APPL
 /** Normal timeline rows: no tapbacks, no system rows (renames, member changes). */
 const VISIBLE = 'm.associated_message_type = 0 AND m.item_type = 0';
 
+/** Columns for MessageRow; the query must alias message m, chat c, handle h. */
+const MESSAGE_COLUMNS = `
+  m.ROWID AS rowId, m.guid AS id, CAST(m.date AS TEXT) AS dateNs, m.is_from_me AS fromMe,
+  ${ms('m.date')} AS sentAt, m.is_delivered AS delivered, ${ms('m.date_delivered')} AS deliveredAt,
+  ${ms('m.date_read')} AS readAt, ${ms('m.date_edited')} AS editedAt,
+  m.date_retracted > 0 AS retracted, m.text, m.attributedBody AS body, m.service,
+  m.error, m.cache_has_attachments AS hasAttachments,
+  m.thread_originator_guid AS replyToId, h.id AS handle, c.guid AS chatId`;
+
+/** Fields that change after a message is first written (receipts, edits, unsend). */
+const MUTABLE_FINGERPRINT = [
+  'm.is_delivered', 'm.date_delivered', 'm.date_read', 'm.date_edited', 'm.date_retracted', 'm.error',
+  'length(m.attributedBody)', 'length(m.text)',
+].map((col) => `ifnull(${col}, 0)`).join(` || ':' || `);
+
+/**
+ * How long a new row that isn't linked to a chat yet holds up the watcher's scan,
+ * in case Messages.app links it in a separate write.
+ */
+const UNLINKED_GRACE_MS = 60_000;
+
 export function messageText(text: string | null, body: Uint8Array | null): string {
   const raw = (body ? decodeAttributedBody(body) : null) ?? text ?? '';
   // U+FFFC marks where an attachment sits inline; attachments are listed separately.
@@ -80,6 +101,7 @@ interface MessageRow {
   hasAttachments: number;
   replyToId: string | null;
   handle: string | null;
+  chatId: string | null;
 }
 
 interface AttachmentRow {
@@ -214,12 +236,7 @@ export class ChatDb {
 
     const rows = this.#db
       .prepare(
-        `SELECT m.ROWID AS rowId, m.guid AS id, CAST(m.date AS TEXT) AS dateNs, m.is_from_me AS fromMe,
-                ${ms('m.date')} AS sentAt, m.is_delivered AS delivered, ${ms('m.date_delivered')} AS deliveredAt,
-                ${ms('m.date_read')} AS readAt, ${ms('m.date_edited')} AS editedAt,
-                m.date_retracted > 0 AS retracted, m.text, m.attributedBody AS body, m.service,
-                m.error, m.cache_has_attachments AS hasAttachments,
-                m.thread_originator_guid AS replyToId, h.id AS handle
+        `SELECT ${MESSAGE_COLUMNS}
          FROM chat c
          JOIN chat_message_join cmj ON cmj.chat_id = c.ROWID
          JOIN message m ON m.ROWID = cmj.message_id
@@ -233,20 +250,89 @@ export class ChatDb {
     const hasMore = rows.length > limit;
     const page = rows.slice(0, limit);
     const oldest = page.at(-1);
-    const attachments = this.#attachmentsFor(page.filter((r) => r.hasAttachments).map((r) => r.rowId));
 
     return {
-      messages: page.reverse().map((row) => this.#toMessage(row, chatId, attachments.get(row.rowId) ?? [])),
+      messages: this.#toMessages(page.reverse()),
       nextCursor: hasMore && oldest ? `${oldest.dateNs}:${oldest.rowId}` : null,
     };
   }
 
-  #toMessage(row: MessageRow, conversationId: string, attachments: AttachmentInfo[]): Message {
+  /**
+   * Visible messages with afterRowId < ROWID <= upTo across all chats, oldest first,
+   * plus the ROWID the scan reached. `more` means the limit cut the scan short.
+   */
+  messagesAfter(
+    afterRowId: number,
+    opts: { limit?: number; upTo?: number } = {},
+  ): { messages: Message[]; scannedTo: number; more: boolean } {
+    const limit = opts.limit ?? 500;
+    const rows = this.#db
+      .prepare(
+        `SELECT ${MESSAGE_COLUMNS}, (${VISIBLE}) AS visible
+         FROM message m
+         LEFT JOIN chat_message_join cmj ON cmj.message_id = m.ROWID
+         LEFT JOIN chat c ON c.ROWID = cmj.chat_id
+         LEFT JOIN handle h ON h.ROWID = m.handle_id
+         WHERE m.ROWID > ? AND m.ROWID <= ?
+         ORDER BY m.ROWID
+         LIMIT ?`,
+      )
+      .all(afterRowId, opts.upTo ?? Number.MAX_SAFE_INTEGER, limit + 1) as unknown as (MessageRow & {
+      visible: number;
+    })[];
+
+    const picked: MessageRow[] = [];
+    let scannedTo = afterRowId;
+    let stopped = false;
+    for (const row of rows.slice(0, limit)) {
+      if (row.visible) {
+        if (!row.chatId && Date.now() - row.sentAt < UNLINKED_GRACE_MS) {
+          stopped = true;
+          break;
+        }
+        // A message joined to two chats appears twice; keep the first.
+        if (row.chatId && picked.at(-1)?.rowId !== row.rowId) picked.push(row);
+      }
+      scannedTo = row.rowId;
+    }
+    return { messages: this.#toMessages(picked), scannedTo, more: !stopped && rows.length > limit };
+  }
+
+  messagesByRowIds(rowIds: number[]): Message[] {
+    if (rowIds.length === 0) return [];
+    const rows = this.#db
+      .prepare(
+        `SELECT ${MESSAGE_COLUMNS}
+         FROM message m
+         JOIN chat_message_join cmj ON cmj.message_id = m.ROWID
+         JOIN chat c ON c.ROWID = cmj.chat_id
+         LEFT JOIN handle h ON h.ROWID = m.handle_id
+         WHERE m.ROWID IN (SELECT value FROM json_each(?))
+         ORDER BY m.ROWID`,
+      )
+      .all(JSON.stringify(rowIds)) as unknown as MessageRow[];
+    return this.#toMessages(rows.filter((row, i) => rows[i - 1]?.rowId !== row.rowId));
+  }
+
+  /** rowId → fingerprint of the fields that change after insert, for visible rows above minRowId. */
+  mutableFingerprints(minRowId: number): Map<number, string> {
+    const rows = this.#db
+      .prepare(`SELECT m.ROWID AS rowId, ${MUTABLE_FINGERPRINT} AS fp FROM message m WHERE m.ROWID > ? AND ${VISIBLE}`)
+      .all(minRowId) as { rowId: number; fp: string }[];
+    return new Map(rows.map((r) => [r.rowId, r.fp]));
+  }
+
+  #toMessages(rows: MessageRow[]): Message[] {
+    const attachments = this.#attachmentsFor(rows.filter((r) => r.hasAttachments).map((r) => r.rowId));
+    return rows.map((row) => this.#toMessage(row, attachments.get(row.rowId) ?? []));
+  }
+
+  #toMessage(row: MessageRow, attachments: AttachmentInfo[]): Message {
     const fromMe = row.fromMe === 1;
     return {
       id: row.id,
       rowId: row.rowId,
-      conversationId,
+      conversationId: row.chatId!,
       fromMe,
       sender: !fromMe && row.handle ? this.participant(row.handle) : null,
       text: row.retracted ? '' : messageText(row.text, row.body),

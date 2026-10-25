@@ -40,6 +40,10 @@ export function Thread({ conversationId, onBack }: { conversationId: string; onB
     queryFn: ({ pageParam }) => api.messages(conversationId, pageParam),
     initialPageParam: undefined as string | undefined,
     getNextPageParam: (last) => last.nextCursor ?? undefined,
+    // Live events keep this current; a refetch would shift page boundaries under the list.
+    staleTime: Infinity,
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
   });
 
   // Pages arrive newest first; each page is oldest first.
@@ -49,7 +53,10 @@ export function Thread({ conversationId, onBack }: { conversationId: string; onB
   );
   const byId = useMemo(() => new Map(messages.map((m) => [m.id, m])), [messages]);
   const lastSentId = useMemo(() => messages.findLast((m) => m.fromMe)?.id, [messages]);
-  const firstItemIndex = START_INDEX - messages.length;
+  // Only older pages count as prepended. Live messages are appended to the newest
+  // page, so they must not move firstItemIndex or Virtuoso treats them as prepends.
+  const olderCount = query.data?.pages.slice(1).reduce((n, p) => n + p.messages.length, 0) ?? 0;
+  const firstItemIndex = START_INDEX - olderCount;
 
   return (
     <section className="thread">
