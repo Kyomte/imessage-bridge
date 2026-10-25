@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "The bundled shell page: core window APIs only.",
+  "windows": ["main"],
+  "permissions": ["core:default"]
+}

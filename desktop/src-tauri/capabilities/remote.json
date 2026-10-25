@@ -1,0 +1,10 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "remote-ui",
+  "description": "The bridge UI served by the Mac may show notifications, nothing else. Keep the URL in sync with shell/config.js.",
+  "windows": ["main"],
+  "remote": {
+    "urls": ["http://your-mac.your-tailnet.ts.net/*"]
+  },
+  "permissions": ["notification:default"]
+}

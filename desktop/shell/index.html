@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Messages</title>
+    <style>
+      :root {
+        color-scheme: light dark;
+        font-family: 'Segoe UI Variable', 'Segoe UI', system-ui, sans-serif;
+      }
+      body {
+        display: grid;
+        min-height: 100vh;
+        margin: 0;
+        place-items: center;
+        background: #f5f5f7;
+        color: #1d1d1f;
+      }
+      @media (prefers-color-scheme: dark) {
+        body {
+          background: #1c1c1e;
+          color: #f5f5f7;
+        }
+      }
+      main {
+        max-width: 340px;
+        padding: 16px;
+        text-align: center;
+      }
+      p {
+        color: #8e8e93;
+        font-size: 13px;
+        line-height: 1.45;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1 style="font-size: 18px">Connecting to your Mac…</h1>
+      <p id="hint">Make sure Tailscale is connected on this PC and the Mac is awake.</p>
+    </main>
+    <script src="config.js"></script>
+    <script>
+      // Open the bridge UI once the Mac answers, so a slow Tailscale start at login
+      // doesn't leave an error page. no-cors: only reachability matters here.
+      const server = window.IMB_SERVER;
+      let attempts = 0;
+      async function connect() {
+        try {
+          await fetch(server + '/api/ping', { mode: 'no-cors', cache: 'no-store' });
+          location.replace(server + '/');
+        } catch {
+          attempts++;
+          if (attempts === 5) document.getElementById('hint').textContent += ' Still trying: ' + server;
+          setTimeout(connect, 3000);
+        }
+      }
+      connect();
+    </script>
+  </body>
+</html>

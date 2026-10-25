@@ -195,8 +195,8 @@ confirmed.
 | M2 | Real-time | Watcher + WS + resume; delivered/read/edited/unsent update live; iPhone-sent messages appear without refresh. Built 2026-10-26: 37 server tests + browser E2E on a synthetic chat.db (event→screen ~25 ms after detection; resume after server restart 1.3 s, no duplicates) |
 | M3 | Send text | Optimistic send, reconciliation, failure/retry, SMS + iMessage. Built 2026-10-26: 49 server tests + browser E2E with a fake Messages.app; real iMessage send to self confirmed (request → matched chat.db row in ~1 s). AppleScript lists only loaded chats, so older 1:1 chats send via participant on the iMessage/SMS account (verified read-only). Real SMS and group sends not yet exercised |
 | M4 | Receive attachments | Inline images/thumbs, video, file download, missing-file placeholder. Built 2026-10-26: 65 server tests + browser E2E with generated media. Real data: thread page with 4 new thumbnails 229 ms (31 ms warm); 34 MB HEVC video → H.264 MP4 in 5.3 s first play, cached after; Opus voice message → m4a 130 ms. Found: `sips -Z` enlarges small images, so it's only applied to larger ones |
-| M5 | Send attachments | Upload → stage → send → reconcile → cleanup after delivery |
-| M6 | Tray app + service | Tauri tray app (pairing, autostart, toasts), server as LaunchAgent single binary, health page |
+| M5 | Send attachments | Upload → stage → send → reconcile → cleanup after delivery. Deferred 2026-10-26: docs/issues/0001-send-attachments.md |
+| M6 | Tray app + service | Tauri tray app (pairing, autostart, toasts), server as LaunchAgent single binary, health page. Built 2026-10-26: "iMessage Bridge.app" launcher (C, command compiled in) spawns node so FDA/Automation attach to the app instead of Homebrew's node (a 50 KB stub that a copy would break); LaunchAgent; degraded mode explaining missing FDA; status panel; Tauri v2 tray app loading the UI from the Mac with a notification-only remote capability |
 | Later | | Tapbacks, inline-reply display, new conversations |
 
 ## Risks

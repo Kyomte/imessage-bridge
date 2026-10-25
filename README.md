@@ -15,6 +15,9 @@ decisions and milestones.
 - M4 attachments: inline photos (HEIC → JPEG), stickers, videos (HEVC → H.264 on first
   play), voice messages (CAF → m4a) and file downloads. Conversions are cached in
   `~/Library/Caches/imessage-bridge/media` (5 GB cap). Needs ffmpeg (`brew install ffmpeg`).
+- M5 sending attachments: deferred, see [docs/issues/0001-send-attachments.md](docs/issues/0001-send-attachments.md).
+- M6 always-on: LaunchAgent service with its own permissions, status panel, Windows
+  tray app ([desktop/](desktop/README.md)).
 
 ## Layout
 
@@ -22,20 +25,39 @@ decisions and milestones.
 shared/   API types used by server and client
 server/   Node 26 + Fastify; reads chat.db read-only (runs .ts directly, no build)
 client/   React + Vite; built into client/dist and served by the server
+desktop/  Windows tray app (Tauri v2) that opens the UI from the Mac
+scripts/  service install/uninstall (LaunchAgent + "iMessage Bridge.app" launcher)
 spike/    M0 probes (decoder corpus test, watcher, osascript sends)
 ```
 
 ## Running (on the Mac)
 
-The process that runs the server needs **Full Disk Access** (chat.db and Contacts).
-
 ```sh
 npm install
-npm run setup     # writes ~/Library/Application Support/imessage-bridge/config.json
-                  # and a pairing password into pairing-password.txt (0600) next to it
-npm run build     # builds the client into client/dist
-npm start         # http://127.0.0.1:7317 (loopback only)
+npm run service:install   # first run also creates config + pairing password
 ```
+
+That builds the client, creates `~/Applications/iMessage Bridge.app` and a LaunchAgent
+(`com.kio.imessage-bridge`) that starts it at login and restarts it if it stops. Then,
+once, on the Mac:
+
+1. **Full Disk Access** (to read chat.db and Contacts): System Settings → Privacy &
+   Security → Full Disk Access → + → `~/Applications/iMessage Bridge.app`. Until then the
+   web UI explains this step; the service restarts by itself when access is granted.
+2. **Automation**: click **Allow** when macOS asks whether iMessage Bridge may control
+   Messages (needed to send). The Status panel in the UI shows both.
+
+The permissions belong to the app, not to node, so `brew upgrade node` doesn't reset
+them. Re-running `service:install` keeps the app unless its launcher changed.
+
+```sh
+npm run service:restart    # after git pull / code changes
+npm run service:logs       # ~/Library/Logs/imessage-bridge/server.log (no message content)
+npm run service:uninstall  # --purge also deletes config, devices, cache, logs
+```
+
+For development, `npm run setup && npm run build && npm start` runs it in a terminal
+(the terminal app then needs Full Disk Access instead).
 
 Remote access is through Tailscale only:
 
