@@ -33,8 +33,13 @@ npm start         # http://127.0.0.1:7317 (loopback only)
 Remote access is through Tailscale only:
 
 ```sh
-tailscale serve --bg 7317   # https://<mac>.<tailnet>.ts.net → 127.0.0.1:7317
+tailscale serve --bg --http=80 7317   # http://<mac>.<tailnet>.ts.net → 127.0.0.1:7317 (tailnet only)
+tailscale serve --http=80 off         # undo
 ```
+
+Plain HTTP is fine here: tailnet traffic is already WireGuard-encrypted end to end.
+HTTPS (`tailscale serve --bg 7317`) needs Serve/HTTPS enabled in the Tailscale admin
+console, which also publishes the machine's ts.net name in Certificate Transparency logs.
 
 Open the ts.net URL on Windows, enter the pairing password, and the device gets
 its own revocable token. `npm run setup -- --rotate-password` issues a new pairing

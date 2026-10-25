@@ -150,7 +150,10 @@ confirmed.
 ## Security
 
 - Server binds to 127.0.0.1; exposed only through `tailscale serve` (tailnet only,
-  never Funnel). Tailscale ACL restricts it to your devices.
+  never Funnel). Tailscale ACL restricts it to your devices. Running as plain HTTP
+  over the tailnet (`tailscale serve --bg --http=80 7317`) because tailnet HTTPS isn't
+  enabled; traffic is WireGuard-encrypted anyway. Verified: a forged
+  `Tailscale-User-Login` header is replaced/stripped by Serve, and the LAN IP is refused.
 - Require the `Tailscale-User-Login` header that `tailscale serve` adds to equal your
   tailnet login.
 - Device pairing: password (scrypt hash in config) once → long-lived, revocable device
