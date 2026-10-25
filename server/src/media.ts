@@ -29,6 +29,26 @@ const VIDEO_TIMEOUT_MS = 10 * 60_000;
 const BROWSER_IMAGES = new Set(['.jpg', '.jpeg', '.png', '.gif', '.webp']);
 const BROWSER_AUDIO = new Set(['.m4a', '.mp3', '.aac', '.wav']);
 
+interface ProbedStream {
+  index: number;
+  codec_type?: string;
+  codec_name?: string;
+}
+
+/**
+ * Picks the streams to keep from `ffprobe -show_streams -of json` output: the first
+ * video stream and the first audio stream ffmpeg can decode. Newer iPhones can add an
+ * audio track ffmpeg reports as codec "none" (e.g. spatial audio); mapping it fails
+ * the whole conversion, so it's skipped.
+ */
+export function pickStreams(streams: ProbedStream[]): { video: ProbedStream | null; audio: ProbedStream | null } {
+  const decodable = (s: ProbedStream) => !!s.codec_name && s.codec_name !== 'none' && s.codec_name !== 'unknown';
+  return {
+    video: streams.find((s) => s.codec_type === 'video' && decodable(s)) ?? null,
+    audio: streams.find((s) => s.codec_type === 'audio' && decodable(s)) ?? null,
+  };
+}
+
 export interface MediaFile {
   path: string;
   /** Original file name, for downloads. */
@@ -216,17 +236,20 @@ export class Media {
   }
 
   async #video(src: string, out: string) {
-    const codec = (
-      await run('ffprobe', ['-v', 'error', '-select_streams', 'v:0', '-show_entries', 'stream=codec_name', '-of', 'default=nw=1:nk=1', src], IMAGE_TIMEOUT_MS)
-    ).trim();
+    const probe = await run('ffprobe', ['-v', 'error', '-show_entries', 'stream=index,codec_type,codec_name', '-of', 'json', src], IMAGE_TIMEOUT_MS);
+    const { video, audio } = pickStreams(JSON.parse(probe).streams ?? []);
+    if (!video) throw new Error('no playable video stream');
     // H.264 plays everywhere, so only rewrap it; anything else (HEVC from iPhones) is
     // transcoded on the Mac's hardware encoder, 8-bit so Windows browsers can decode it.
-    const videoArgs = codec === 'h264'
+    const videoArgs = video.codec_name === 'h264'
       ? ['-c:v', 'copy']
       : ['-c:v', 'h264_videotoolbox', '-b:v', '6M', '-maxrate', '8M', '-bufsize', '16M', '-pix_fmt', 'yuv420p'];
+    const audioArgs = !audio
+      ? ['-an']
+      : ['-map', `0:${audio.index}`, ...(audio.codec_name === 'aac' ? ['-c:a', 'copy'] : ['-c:a', 'aac', '-b:a', '128k'])];
     await run(
       'ffmpeg',
-      ['-v', 'error', '-y', '-i', src, '-map', '0:v:0', '-map', '0:a?', ...videoArgs, '-c:a', 'aac', '-b:a', '128k', '-movflags', '+faststart', '-f', 'mp4', out],
+      ['-v', 'error', '-y', '-i', src, '-map', `0:${video.index}`, ...videoArgs, ...audioArgs, '-movflags', '+faststart', '-f', 'mp4', out],
       VIDEO_TIMEOUT_MS,
     );
   }

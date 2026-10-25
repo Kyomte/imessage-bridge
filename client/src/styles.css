@@ -554,15 +554,32 @@ a.attachment:hover {
   place-items: center;
 }
 
+.lightbox-video {
+  position: relative;
+  display: grid;
+  max-width: 100%;
+  max-height: 100%;
+  min-width: min(320px, 100%);
+  min-height: 180px;
+  place-items: center;
+}
+
 .lightbox-note {
-  color: rgb(255 255 255 / 0.8);
+  position: absolute;
+  inset: 0;
+  display: grid;
+  padding: 16px;
+  place-items: center;
+  color: rgb(255 255 255 / 0.85);
   font-size: 14px;
+  text-align: center;
+  pointer-events: none;
 }
 
 .lightbox-body img,
 .lightbox-body video {
   max-width: 100%;
-  max-height: 100%;
+  max-height: calc(100vh - 80px);
   object-fit: contain;
 }
 

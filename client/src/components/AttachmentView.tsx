@@ -104,22 +104,25 @@ function LightboxVideo({ src }: { src: string }) {
   const [state, setState] = useState<'preparing' | 'ready' | 'error'>('preparing');
   return (
     <>
-      {state !== 'ready' && (
-        <div className="lightbox-note">
-          {state === 'error' ? "This video couldn't be played." : 'Preparing video…'}
-        </div>
-      )}
-      {/* The first play of a video waits while the Mac converts it (~5 s for 30 MB). */}
-      <video
-        className="sensitive"
-        src={src}
-        controls
-        autoPlay
-        hidden={state !== 'ready'}
-        onLoadedData={() => setState('ready')}
-        onError={() => setState('error')}
-        onClick={(e) => e.stopPropagation()}
-      />
+      {/* The first play of a video waits while the Mac converts it (~5 s for 30 MB).
+          The video stays rendered underneath: a hidden <video> may never load. */}
+      <div className="lightbox-video">
+        <video
+          className="sensitive"
+          src={src}
+          controls
+          autoPlay
+          onLoadedData={() => setState('ready')}
+          onPlaying={() => setState('ready')}
+          onError={() => setState('error')}
+          onClick={(e) => e.stopPropagation()}
+        />
+        {state !== 'ready' && (
+          <div className="lightbox-note">
+            {state === 'error' ? "This video couldn't be played. Use Download to open it on this PC." : 'Preparing video…'}
+          </div>
+        )}
+      </div>
     </>
   );
 }

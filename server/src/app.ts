@@ -171,9 +171,10 @@ export function buildApp({
       let file;
       try {
         file = await media.get(req.params.id, req.params.variant as Variant);
-      } catch {
-        // Details stay out of the log: ffmpeg/sips errors include file paths.
-        req.log.warn({ variant: req.params.variant }, 'media conversion failed');
+      } catch (err) {
+        // ffmpeg/sips errors name files; strip every path before logging.
+        const reason = String(err instanceof Error ? err.message : err).replace(/\/[^\s'"]+/g, '<path>').slice(0, 300);
+        req.log.warn({ variant: req.params.variant, reason }, 'media conversion failed');
         return reply.code(422).send({ error: 'could not convert this attachment' });
       }
       if (!file) return reply.code(404).send({ error: 'not found' });

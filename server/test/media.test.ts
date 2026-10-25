@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { ChatDb } from '../src/chatdb/index.ts';
 import { Contacts } from '../src/contacts.ts';
-import { Media } from '../src/media.ts';
+import { Media, pickStreams } from '../src/media.ts';
 import { Store } from '../src/store.ts';
 import { buildApp } from '../src/app.ts';
 import { DEFAULTS } from '../src/config.ts';
@@ -99,6 +99,19 @@ test('CAF voice message: converted to AAC m4a', { skip }, async () => {
   const preview = await media.get(ids.caf, 'preview');
   assert.ok(preview!.path.endsWith('.m4a'));
   assert.equal(probe(preview!.path, 'stream=codec_name'), 'aac');
+});
+
+test('pickStreams skips audio tracks ffmpeg cannot decode', () => {
+  const picked = pickStreams([
+    { index: 0, codec_type: 'video', codec_name: 'h264' },
+    { index: 1, codec_type: 'audio', codec_name: 'none' },
+    { index: 2, codec_type: 'audio', codec_name: 'aac' },
+    { index: 3, codec_type: 'data' },
+  ]);
+  assert.equal(picked.video?.index, 0);
+  assert.equal(picked.audio?.index, 2);
+  assert.equal(pickStreams([{ index: 0, codec_type: 'video', codec_name: 'hevc' }, { index: 1, codec_type: 'audio', codec_name: 'none' }]).audio, null);
+  assert.equal(pickStreams([{ index: 0, codec_type: 'audio', codec_name: 'aac' }]).video, null);
 });
 
 test('files: no thumb, preview is the original', { skip }, async () => {
