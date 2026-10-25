@@ -27,6 +27,8 @@ export interface LiveDeps {
   watcher: Watcher;
   /** Extra origins allowed to open the socket (e.g. the Tauri app). Same-origin is always allowed. */
   allowedOrigins?: string[];
+  /** Returns the client bundle currently served, so open pages can tell they're stale. */
+  clientBuild?: () => string | null;
 }
 
 export interface Live {
@@ -44,7 +46,10 @@ function originAllowed(origin: string, host: string | undefined, allowed: string
   }
 }
 
-export function registerLive(app: FastifyInstance, { chatDb, store, watcher, allowedOrigins = [] }: LiveDeps): Live {
+export function registerLive(
+  app: FastifyInstance,
+  { chatDb, store, watcher, allowedOrigins = [], clientBuild = () => null }: LiveDeps,
+): Live {
   const clients = new Map<WebSocket, { deviceId: number; alive: boolean }>();
 
   const send = (socket: WebSocket, event: ServerEvent) => {
@@ -100,7 +105,12 @@ export function registerLive(app: FastifyInstance, { chatDb, store, watcher, all
           }
           clearTimeout(authTimer);
           clients.set(socket, { deviceId: device.id, alive: true });
-          send(socket, { type: 'hello', lastRowId: watcher.lastRowId, serverTime: Date.now() });
+          send(socket, {
+            type: 'hello',
+            lastRowId: watcher.lastRowId,
+            serverTime: Date.now(),
+            clientBuild: clientBuild(),
+          });
           return;
         }
 

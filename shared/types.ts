@@ -115,7 +115,8 @@ export interface SendRequest {
 // because a browser WebSocket can't send an Authorization header.
 
 export type ServerEvent =
-  | { type: 'hello'; lastRowId: number; serverTime: number }
+  /** clientBuild: file name of the client bundle the server currently serves, to spot stale pages. */
+  | { type: 'hello'; lastRowId: number; serverTime: number; clientBuild: string | null }
   | { type: 'message.new'; message: Message }
   | { type: 'message.updated'; message: Message }
   | { type: 'conversation.updated'; conversation: ConversationSummary }

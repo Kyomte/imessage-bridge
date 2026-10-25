@@ -33,10 +33,12 @@ export function ConversationList({
   selectedId,
   onSelect,
   liveStatus,
+  stale,
 }: {
   selectedId: string | null;
   onSelect: (id: string) => void;
   liveStatus: LiveStatus;
+  stale: boolean;
 }) {
   const { data, isLoading, error } = useConversations();
   const [query, setQuery] = useState('');
@@ -56,6 +58,14 @@ export function ConversationList({
           <span className="live-dot" aria-hidden />
           {STATUS_LABEL[liveStatus]}
         </div>
+        {stale && (
+          <div className="update-banner" role="status">
+            New version available
+            <button type="button" onClick={() => location.reload()}>
+              Reload
+            </button>
+          </div>
+        )}
       </div>
       {isLoading && <div className="list-status">Loading conversations…</div>}
       {error && <div className="list-status error">Couldn't load conversations.</div>}

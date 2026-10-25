@@ -1,7 +1,8 @@
 import Fastify, { LogController, type FastifyInstance } from 'fastify';
 import fastifyStatic from '@fastify/static';
 import { execFileSync } from 'node:child_process';
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import type { Health, PairResponse, SendRequest } from '@imb/shared';
 import type { Config } from './config.ts';
 import type { ChatDb } from './chatdb/index.ts';
@@ -70,7 +71,13 @@ export function buildApp({
     req.device = device;
   });
 
-  const live = registerLive(app, { chatDb, store, watcher, allowedOrigins: config.allowedOrigins });
+  const live = registerLive(app, {
+    chatDb,
+    store,
+    watcher,
+    allowedOrigins: config.allowedOrigins,
+    clientBuild: () => (clientDir ? servedBundle(clientDir) : null),
+  });
   sender.subscribe((status) => live.broadcast({ type: 'send.status', status }));
 
   app.get('/api/ping', async () => ({ ok: true }));
@@ -187,6 +194,15 @@ export function buildApp({
   }
 
   return app;
+}
+
+/** "index-<hash>.js" from the built index.html; read per call so a rebuild shows up without a restart. */
+export function servedBundle(clientDir: string): string | null {
+  try {
+    return readFileSync(join(clientDir, 'index.html'), 'utf8').match(/assets\/(index-[\w-]+\.js)/)?.[1] ?? null;
+  } catch {
+    return null;
+  }
 }
 
 function isMessagesRunning(): boolean {

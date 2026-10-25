@@ -38,9 +38,10 @@ const selectionFromHash = () => {
 function Main({ token }: { token: string }) {
   const [selected, setSelected] = useState(selectionFromHash);
   const [liveStatus, setLiveStatus] = useState<LiveStatus>('connecting');
+  const [stale, setStale] = useState(false);
   const queryClient = useQueryClient();
 
-  useEffect(() => connectLive(queryClient, token, setLiveStatus), [queryClient, token]);
+  useEffect(() => connectLive(queryClient, token, setLiveStatus, () => setStale(true)), [queryClient, token]);
 
   useEffect(() => {
     const onHashChange = () => setSelected(selectionFromHash());
@@ -54,7 +55,7 @@ function Main({ token }: { token: string }) {
 
   return (
     <div className={`layout ${selected ? 'has-selection' : ''}`}>
-      <ConversationList selectedId={selected} onSelect={select} liveStatus={liveStatus} />
+      <ConversationList selectedId={selected} onSelect={select} liveStatus={liveStatus} stale={stale} />
       <main className="pane">
         {selected ? (
           <Thread key={selected} conversationId={selected} onBack={() => select(null)} />

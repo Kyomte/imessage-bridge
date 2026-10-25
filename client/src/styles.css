@@ -148,6 +148,31 @@ code {
   background: var(--error);
 }
 
+.update-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 8px;
+  padding: 6px 6px 6px 10px;
+  border-radius: 8px;
+  background: var(--accent);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.update-banner button {
+  padding: 3px 10px;
+  border: none;
+  border-radius: 999px;
+  background: #fff;
+  color: var(--accent);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
 .conversation-list {
   flex: 1;
 }

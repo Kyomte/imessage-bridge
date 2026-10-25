@@ -14,6 +14,9 @@ import { applySendStatus, settle } from './outbox.ts';
 
 export type LiveStatus = 'connecting' | 'live' | 'offline';
 
+/** This page's own bundle name ("index-<hash>.js"); null in dev, where there's no bundle. */
+const OWN_BUILD = import.meta.env.DEV ? null : (new URL(import.meta.url).pathname.split('/').pop() ?? null);
+
 type Pages = InfiniteData<MessagePage, string | undefined>;
 
 const MAX_BACKOFF_MS = 30_000;
@@ -64,7 +67,12 @@ export function applyConversation(client: QueryClient, conversation: Conversatio
 }
 
 /** Connects and keeps reconnecting until the returned function is called. */
-export function connectLive(client: QueryClient, token: string, onStatus: (status: LiveStatus) => void): () => void {
+export function connectLive(
+  client: QueryClient,
+  token: string,
+  onStatus: (status: LiveStatus) => void,
+  onStale: () => void,
+): () => void {
   let socket: WebSocket | null = null;
   let stopped = false;
   let attempt = 0;
@@ -79,6 +87,7 @@ export function connectLive(client: QueryClient, token: string, onStatus: (statu
       case 'hello':
         attempt = 0;
         onStatus('live');
+        if (OWN_BUILD && event.clientBuild && event.clientBuild !== OWN_BUILD) onStale();
         if (lastRowId !== null && lastRowId < event.lastRowId) {
           send({ type: 'resume', sinceRowId: lastRowId });
           client.invalidateQueries({ queryKey: ['conversations'] });

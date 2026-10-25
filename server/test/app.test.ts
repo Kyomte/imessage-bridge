@@ -86,3 +86,13 @@ test('pairing is rate limited after repeated failures', async () => {
   }
   assert.equal(statuses.at(-1), 429);
 });
+
+test('servedBundle reads the hashed bundle name from index.html', async () => {
+  const { servedBundle } = await import('../src/app.ts');
+  const { writeFileSync, mkdirSync } = await import('node:fs');
+  const clientDir = join(dir, 'dist');
+  mkdirSync(clientDir, { recursive: true });
+  assert.equal(servedBundle(clientDir), null);
+  writeFileSync(join(clientDir, 'index.html'), '<script type="module" src="/assets/index-AbC_12-x.js"></script>');
+  assert.equal(servedBundle(clientDir), 'index-AbC_12-x.js');
+});
