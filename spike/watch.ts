@@ -19,8 +19,11 @@ const minutes = Number(process.argv[2] ?? 30);
 
 const db = new DatabaseSync(`${dir}/chat.db`, { readOnly: true });
 const dataVersion = db.prepare('PRAGMA data_version');
+// Apple dates (~8e17 ns) exceed Number.MAX_SAFE_INTEGER and node:sqlite throws on
+// them, so convert to Unix ms inside SQL.
 const newRows = db.prepare(`
-  SELECT m.ROWID AS rowid, m.is_from_me AS fromMe, m.date, m.service,
+  SELECT m.ROWID AS rowid, m.is_from_me AS fromMe,
+         m.date / 1000000 + ${APPLE_EPOCH_MS} AS sentAtMs, m.service,
          m.associated_message_type AS assocType, m.cache_has_attachments AS hasAttachments,
          m.error, c.style
   FROM message m
@@ -40,7 +43,7 @@ const log = (event: Record<string, unknown>) =>
 function check(source: string) {
   const rows = newRows.all(lastRowId) as Record<string, number | string | null>[];
   for (const row of rows) {
-    const sentAtMs = Number(row.date) / 1e6 + APPLE_EPOCH_MS;
+    const sentAtMs = Number(row.sentAtMs);
     log({
       source,
       rowid: row.rowid,

@@ -69,6 +69,11 @@ iPhone ─iCloud / SMS relay─► Messages.app ─writes─► chat.db (WAL)
 Joins: `chat` → `chat_message_join` → `message` → `handle`;
 `message_attachment_join` → `attachment`.
 
+**Big integers:** `node:sqlite` throws `ERR_OUT_OF_RANGE` on any integer above 2^53,
+and every Apple nanosecond date (`date`, `date_read`, `date_delivered`, `date_edited`,
+`date_retracted`, …) is ~8e17. Convert in SQL (`date / 1000000 + 978307200000 AS …Ms`)
+in every query, or use `stmt.setReadBigInts(true)` where raw values are needed.
+
 Timeline filters: `associated_message_type = 0` (drop tapbacks), `item_type = 0`
 (drop system rows; groups may later render them as "X renamed the group").
 Order by `date`; use `ROWID` only for change detection (iCloud backfills out of order).
