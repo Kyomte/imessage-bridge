@@ -2,14 +2,16 @@ import Fastify, { LogController, type FastifyInstance } from 'fastify';
 import fastifyStatic from '@fastify/static';
 import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
-import { join } from 'node:path';
-import type { Health, PairResponse, SendRequest } from '@imb/shared';
+import { tmpdir } from 'node:os';
+import { basename, dirname, join } from 'node:path';
+import type { Health, MediaToken, PairResponse, SendRequest } from '@imb/shared';
 import type { Config } from './config.ts';
 import type { ChatDb } from './chatdb/index.ts';
 import type { Contacts } from './contacts.ts';
 import type { Device, Store } from './store.ts';
 import type { Watcher } from './watcher.ts';
 import type { Sender } from './sender.ts';
+import { VARIANTS, type Media, type Variant } from './media.ts';
 import { verifyPassword } from './passwords.ts';
 import { registerLive } from './live.ts';
 
@@ -24,6 +26,7 @@ const PUBLIC_ROUTES = new Set(['/api/ping', '/api/auth/pair', '/api/ws']);
 const PAIR_WINDOW_MS = 5 * 60_000;
 const PAIR_MAX_FAILURES = 5;
 const MAX_TEXT_LENGTH = 4000;
+const MEDIA_ROUTE = '/api/attachments/:id/:variant';
 const SENDS_PER_MINUTE = 30;
 
 export interface AppDeps {
@@ -33,6 +36,7 @@ export interface AppDeps {
   store: Store;
   watcher: Watcher;
   sender: Sender;
+  media: Media;
   clientDir?: string;
   logger?: boolean;
 }
@@ -44,6 +48,7 @@ export function buildApp({
   store,
   watcher,
   sender,
+  media,
   clientDir,
   logger = true,
 }: AppDeps): FastifyInstance {
@@ -66,7 +71,12 @@ export function buildApp({
     }
     if (PUBLIC_ROUTES.has(req.routeOptions.url ?? '')) return;
     const token = req.headers.authorization?.match(/^Bearer (.+)$/)?.[1];
-    const device = token ? store.deviceForToken(token) : null;
+    let device = token ? store.deviceForToken(token) : null;
+    // <img>/<video> can't send headers, so attachment URLs may carry a media token instead.
+    if (!device && req.routeOptions.url === MEDIA_ROUTE) {
+      const mediaToken = (req.query as { t?: unknown }).t;
+      if (typeof mediaToken === 'string') device = store.deviceForMediaToken(mediaToken);
+    }
     if (!device) return reply.code(401).send({ error: 'unauthorized' });
     req.device = device;
   });
@@ -139,14 +149,37 @@ export function buildApp({
     async (req, reply) => {
       if (!chatDb.getConversation(req.params.id)) return reply.code(404).send({ error: 'not found' });
       try {
-        return chatDb.listMessages(req.params.id, {
+        const page = chatDb.listMessages(req.params.id, {
           before: req.query.before,
           limit: req.query.limit ? Number(req.query.limit) : undefined,
         });
+        await media.fillSizes(page.messages);
+        return page;
       } catch (err) {
         if (err instanceof Error && err.message === 'bad cursor') return reply.code(400).send({ error: 'bad cursor' });
         throw err;
       }
+    },
+  );
+
+  app.get('/api/media-token', async (req): Promise<MediaToken> => store.createMediaToken(req.device!.id));
+
+  app.get<{ Params: { id: string; variant: string }; Querystring: { download?: string } }>(
+    MEDIA_ROUTE,
+    async (req, reply) => {
+      if (!VARIANTS.has(req.params.variant)) return reply.code(404).send({ error: 'not found' });
+      let file;
+      try {
+        file = await media.get(req.params.id, req.params.variant as Variant);
+      } catch {
+        // Details stay out of the log: ffmpeg/sips errors include file paths.
+        req.log.warn({ variant: req.params.variant }, 'media conversion failed');
+        return reply.code(422).send({ error: 'could not convert this attachment' });
+      }
+      if (!file) return reply.code(404).send({ error: 'not found' });
+      reply.header('cache-control', 'private, max-age=86400');
+      if (req.query.download) reply.header('content-disposition', contentDisposition(file.name));
+      return reply.sendFile(basename(file.path), dirname(file.path));
     },
   );
 
@@ -185,8 +218,10 @@ export function buildApp({
     },
   );
 
-  if (clientDir && existsSync(clientDir)) {
-    app.register(fastifyStatic, { root: clientDir });
+  // Always registered for reply.sendFile (attachments); it serves files only with a client build.
+  const serveClient = !!clientDir && existsSync(clientDir);
+  app.register(fastifyStatic, serveClient ? { root: clientDir! } : { root: tmpdir(), serve: false });
+  if (serveClient) {
     app.setNotFoundHandler((req, reply) => {
       if (req.method === 'GET' && !req.url.startsWith('/api/')) return reply.sendFile('index.html');
       return reply.code(404).send({ error: 'not found' });
@@ -194,6 +229,11 @@ export function buildApp({
   }
 
   return app;
+}
+
+function contentDisposition(name: string): string {
+  const ascii = name.replace(/[^\x20-\x7e]|["\\]/g, '_');
+  return `attachment; filename="${ascii}"; filename*=UTF-8''${encodeURIComponent(name)}`;
 }
 
 /** "index-<hash>.js" from the built index.html; read per call so a rebuild shows up without a restart. */

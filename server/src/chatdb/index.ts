@@ -34,11 +34,16 @@ const MESSAGE_COLUMNS = `
   m.error, m.cache_has_attachments AS hasAttachments,
   m.thread_originator_guid AS replyToId, h.id AS handle, c.guid AS chatId`;
 
-/** Fields that change after a message is first written (receipts, edits, unsend). */
+/** Fields that change after a message is first written (receipts, edits, unsend, attachment download). */
 const MUTABLE_FINGERPRINT = [
   'm.is_delivered', 'm.date_delivered', 'm.date_read', 'm.date_edited', 'm.date_retracted', 'm.error',
   'length(m.attributedBody)', 'length(m.text)',
+  `(SELECT group_concat(a.transfer_state) FROM message_attachment_join maj
+    JOIN attachment a ON a.ROWID = maj.attachment_id WHERE maj.message_id = m.ROWID)`,
 ].map((col) => `ifnull(${col}, 0)`).join(` || ':' || `);
+
+/** transfer_state values for a file that is complete on disk (0 = local/never transferred, 5 = finished). */
+const TRANSFER_DONE = new Set([0, 5]);
 
 /**
  * How long a new row that isn't linked to a chat yet holds up the watcher's scan,
@@ -66,6 +71,9 @@ export function attachmentKind(mimeType: string | null, name: string): Attachmen
 }
 
 export const expandHome = (path: string) => (path.startsWith('~/') ? homedir() + path.slice(1) : path);
+
+const isAvailable = (row: { path: string | null; transferState: number | null }) =>
+  row.path != null && TRANSFER_DONE.has(row.transferState ?? 0) && existsSync(expandHome(row.path));
 
 interface ConversationRow {
   chatRowId: number;
@@ -112,6 +120,19 @@ interface AttachmentRow {
   mimeType: string | null;
   size: number | null;
   isSticker: number;
+  transferState: number | null;
+}
+
+/** What the media layer needs to serve one attachment. */
+export interface AttachmentFile {
+  id: string;
+  name: string;
+  /** Absolute path, `~` expanded; not yet checked against the Attachments folder. */
+  path: string | null;
+  mimeType: string | null;
+  kind: AttachmentKind;
+  isSticker: boolean;
+  available: boolean;
 }
 
 export class ChatDb {
@@ -349,13 +370,35 @@ export class ChatDb {
     };
   }
 
+  attachmentById(id: string): AttachmentFile | null {
+    const row = this.#db
+      .prepare(
+        `SELECT a.guid AS id, a.transfer_name AS name, a.filename AS path, a.mime_type AS mimeType,
+                a.is_sticker AS isSticker, a.transfer_state AS transferState
+         FROM attachment a WHERE a.guid = ? AND a.hide_attachment = 0`,
+      )
+      .get(id) as Omit<AttachmentRow, 'messageRowId' | 'size'> | undefined;
+    if (!row) return null;
+    const name = row.name ?? row.path?.split('/').at(-1) ?? 'attachment';
+    return {
+      id: row.id,
+      name,
+      path: row.path ? expandHome(row.path) : null,
+      mimeType: row.mimeType,
+      kind: attachmentKind(row.mimeType, name),
+      isSticker: row.isSticker === 1,
+      available: isAvailable(row),
+    };
+  }
+
   #attachmentsFor(messageRowIds: number[]): Map<number, AttachmentInfo[]> {
     const byMessage = new Map<number, AttachmentInfo[]>();
     if (messageRowIds.length === 0) return byMessage;
     const rows = this.#db
       .prepare(
         `SELECT maj.message_id AS messageRowId, a.guid AS id, a.transfer_name AS name, a.filename AS path,
-                a.mime_type AS mimeType, a.total_bytes AS size, a.is_sticker AS isSticker
+                a.mime_type AS mimeType, a.total_bytes AS size, a.is_sticker AS isSticker,
+                a.transfer_state AS transferState
          FROM message_attachment_join maj JOIN attachment a ON a.ROWID = maj.attachment_id
          WHERE maj.message_id IN (SELECT value FROM json_each(?)) AND a.hide_attachment = 0
          ORDER BY maj.message_id, a.ROWID`,
@@ -369,8 +412,10 @@ export class ChatDb {
         mimeType: row.mimeType,
         kind: attachmentKind(row.mimeType, name),
         size: row.size ?? 0,
-        available: row.path != null && existsSync(expandHome(row.path)),
+        available: isAvailable(row),
         isSticker: row.isSticker === 1,
+        width: null,
+        height: null,
       };
       const list = byMessage.get(row.messageRowId) ?? [];
       list.push(info);

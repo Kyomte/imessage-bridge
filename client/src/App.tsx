@@ -6,6 +6,7 @@ import { Pair } from './components/Pair.tsx';
 import { ConversationList } from './components/ConversationList.tsx';
 import { Thread } from './components/Thread.tsx';
 import { usePrivacyBlur } from './usePrivacyBlur.ts';
+import { Lightbox } from './components/AttachmentView.tsx';
 
 export function App() {
   const [token, setTokenState] = useState(getToken);
@@ -63,6 +64,7 @@ function Main({ token }: { token: string }) {
           <div className="empty-state">Select a conversation</div>
         )}
       </main>
+      <Lightbox />
     </div>
   );
 }

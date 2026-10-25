@@ -32,9 +32,18 @@ export interface AttachmentInfo {
   mimeType: string | null;
   kind: AttachmentKind;
   size: number;
-  /** False when the file isn't downloaded on the Mac. */
+  /** False when the file isn't (fully) downloaded on the Mac. */
   available: boolean;
   isSticker: boolean;
+  /** Display size of the thumbnail when already known, so the layout doesn't jump. */
+  width: number | null;
+  height: number | null;
+}
+
+export interface MediaToken {
+  /** Append as ?t= to /api/attachments URLs (img/video tags can't send headers). */
+  token: string;
+  expiresAt: number;
 }
 
 export interface Message {

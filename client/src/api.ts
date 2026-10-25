@@ -1,4 +1,4 @@
-import type { ConversationSummary, MessagePage, PairResponse, SendRequest, SendStatus } from '@imb/shared';
+import type { ConversationSummary, MediaToken, MessagePage, PairResponse, SendRequest, SendStatus } from '@imb/shared';
 
 // Empty for the web build (same origin); the Tauri app will point this at the ts.net URL.
 const BASE = import.meta.env.VITE_API_BASE ?? '';
@@ -58,12 +58,22 @@ export const api = {
     return request<MessagePage>(`/api/conversations/${encodeURIComponent(conversationId)}/messages?${params}`);
   },
 
+  mediaToken: () => request<MediaToken>('/api/media-token'),
+
   send: (conversationId: string, body: SendRequest) =>
     request<SendStatus>(`/api/conversations/${encodeURIComponent(conversationId)}/messages`, {
       method: 'POST',
       body: JSON.stringify(body),
     }),
 };
+
+export type MediaVariant = 'thumb' | 'preview' | 'original';
+
+export function mediaUrl(attachmentId: string, variant: MediaVariant, token: string, download = false): string {
+  const params = new URLSearchParams({ t: token });
+  if (download) params.set('download', '1');
+  return `${BASE}/api/attachments/${encodeURIComponent(attachmentId)}/${variant}?${params}`;
+}
 
 /**
  * Random id for idempotent sends. crypto.randomUUID() needs a secure context and the

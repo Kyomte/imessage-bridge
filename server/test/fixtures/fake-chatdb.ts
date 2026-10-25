@@ -33,7 +33,8 @@ export class FakeChatDb {
         associated_message_type INTEGER DEFAULT 0, item_type INTEGER DEFAULT 0);
       CREATE TABLE chat_message_join (chat_id INTEGER, message_id INTEGER, message_date INTEGER);
       CREATE TABLE attachment (ROWID INTEGER PRIMARY KEY, guid TEXT, transfer_name TEXT, filename TEXT,
-        mime_type TEXT, total_bytes INTEGER, is_sticker INTEGER DEFAULT 0, hide_attachment INTEGER DEFAULT 0);
+        mime_type TEXT, total_bytes INTEGER, is_sticker INTEGER DEFAULT 0, hide_attachment INTEGER DEFAULT 0,
+        transfer_state INTEGER DEFAULT 5);
       CREATE TABLE message_attachment_join (message_id INTEGER, attachment_id INTEGER);
     `);
   }
@@ -86,6 +87,30 @@ export class FakeChatDb {
 
   edit(rowId: number, text: string, at = Date.now()) {
     this.#db.prepare('UPDATE message SET text = ?, date_edited = ? WHERE ROWID = ?').run(text, appleNs(at), rowId);
+  }
+
+  /** Adds an attachment to a message; returns its guid. */
+  addAttachment(
+    messageRowId: number,
+    opts: { filename: string | null; mimeType?: string | null; name?: string; sticker?: boolean; transferState?: number },
+  ): string {
+    const guid = `att-${++this.#guid}`;
+    const attachmentRowId = Number(
+      this.#db
+        .prepare(
+          `INSERT INTO attachment (guid, transfer_name, filename, mime_type, total_bytes, is_sticker, transfer_state)
+           VALUES (?, ?, ?, ?, 0, ?, ?)`,
+        )
+        .run(guid, opts.name ?? opts.filename?.split('/').at(-1) ?? null, opts.filename, opts.mimeType ?? null,
+          opts.sticker ? 1 : 0, opts.transferState ?? 5).lastInsertRowid,
+    );
+    this.#db.prepare('INSERT INTO message_attachment_join VALUES (?, ?)').run(messageRowId, attachmentRowId);
+    this.#db.prepare('UPDATE message SET cache_has_attachments = 1 WHERE ROWID = ?').run(messageRowId);
+    return guid;
+  }
+
+  setTransferState(attachmentGuid: string, state: number) {
+    this.#db.prepare('UPDATE attachment SET transfer_state = ? WHERE guid = ?').run(state, attachmentGuid);
   }
 
   setError(rowId: number, error = 22) {

@@ -1,8 +1,8 @@
-// The bridge's own database (never chat.db): paired devices for now; the send
-// outbox and media cache index land here in later milestones.
+// The bridge's own database (never chat.db): paired devices, the secret that signs
+// media links, and thumbnail sizes.
 
 import { DatabaseSync } from 'node:sqlite';
-import { createHash, randomBytes } from 'node:crypto';
+import { createHash, createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 
@@ -14,6 +14,9 @@ export interface Device {
 }
 
 const sha256 = (s: string) => createHash('sha256').update(s).digest('hex');
+
+/** Media links stay valid this long; the client refreshes its token well before. */
+export const MEDIA_TOKEN_TTL_MS = 24 * 60 * 60_000;
 
 export class Store {
   #db: DatabaseSync;
@@ -30,7 +33,59 @@ export class Store {
         created_at INTEGER NOT NULL,
         last_seen_at INTEGER
       );
+      CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+      CREATE TABLE IF NOT EXISTS media_meta (
+        attachment_id TEXT PRIMARY KEY,
+        width INTEGER NOT NULL,
+        height INTEGER NOT NULL
+      );
     `);
+  }
+
+  #setting(key: string, create: () => string): string {
+    const row = this.#db.prepare('SELECT value FROM settings WHERE key = ?').get(key) as { value: string } | undefined;
+    if (row) return row.value;
+    const value = create();
+    this.#db.prepare('INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)').run(key, value);
+    return (this.#db.prepare('SELECT value FROM settings WHERE key = ?').get(key) as { value: string }).value;
+  }
+
+  #mediaSecret(): Buffer {
+    return Buffer.from(this.#setting('media_secret', () => randomBytes(32).toString('base64url')), 'base64url');
+  }
+
+  /** "<deviceId>.<expiresAt>.<hmac>", for ?t= on media URLs. */
+  createMediaToken(deviceId: number, now = Date.now()): { token: string; expiresAt: number } {
+    const expiresAt = now + MEDIA_TOKEN_TTL_MS;
+    const payload = `${deviceId}.${expiresAt}`;
+    const mac = createHmac('sha256', this.#mediaSecret()).update(payload).digest('base64url');
+    return { token: `${payload}.${mac}`, expiresAt };
+  }
+
+  /** The device a media token belongs to, if the token is genuine, unexpired and the device still exists. */
+  deviceForMediaToken(token: string, now = Date.now()): Device | null {
+    const [deviceId, expiresAt, mac] = token.split('.');
+    if (!deviceId || !expiresAt || !mac || Number(expiresAt) < now) return null;
+    const expected = createHmac('sha256', this.#mediaSecret()).update(`${deviceId}.${expiresAt}`).digest();
+    const actual = Buffer.from(mac, 'base64url');
+    if (actual.length !== expected.length || !timingSafeEqual(actual, expected)) return null;
+    const row = this.#db
+      .prepare('SELECT id, name, created_at AS createdAt, last_seen_at AS lastSeenAt FROM devices WHERE id = ?')
+      .get(Number(deviceId)) as Device | undefined;
+    return row ? { ...row } : null;
+  }
+
+  mediaSize(attachmentId: string): { width: number; height: number } | null {
+    const row = this.#db
+      .prepare('SELECT width, height FROM media_meta WHERE attachment_id = ?')
+      .get(attachmentId) as { width: number; height: number } | undefined;
+    return row ? { ...row } : null;
+  }
+
+  setMediaSize(attachmentId: string, width: number, height: number) {
+    this.#db
+      .prepare('INSERT OR REPLACE INTO media_meta (attachment_id, width, height) VALUES (?, ?, ?)')
+      .run(attachmentId, width, height);
   }
 
   /** Creates a device and returns its bearer token. Only the hash is stored. */

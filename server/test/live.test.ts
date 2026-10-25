@@ -13,6 +13,7 @@ import { hashPassword } from '../src/passwords.ts';
 import { Store } from '../src/store.ts';
 import { Watcher } from '../src/watcher.ts';
 import { Sender } from '../src/sender.ts';
+import { Media } from '../src/media.ts';
 import { FakeChatDb } from './fixtures/fake-chatdb.ts';
 
 const fake = new FakeChatDb();
@@ -31,7 +32,8 @@ const sender = new Sender(watcher, {
     watcher.check();
   },
 });
-const app = buildApp({ config, chatDb, contacts, store, watcher, sender, logger: false });
+const media = new Media(chatDb, store, { cacheDir: join(dataDir, 'cache'), attachmentsRoot: join(dataDir, 'Attachments') });
+const app = buildApp({ config, chatDb, contacts, store, watcher, sender, media, logger: false });
 const { token } = store.createDevice('test');
 let url: string;
 

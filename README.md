@@ -12,6 +12,9 @@ decisions and milestones.
   edits and unsends appear without reloading. The sidebar shows Live / Offline.
 - M3 sending text: composer in each thread; sends go through Messages.app via osascript
   and are confirmed against chat.db (Sending… → real message, or Not Delivered + Retry).
+- M4 attachments: inline photos (HEIC → JPEG), stickers, videos (HEVC → H.264 on first
+  play), voice messages (CAF → m4a) and file downloads. Conversions are cached in
+  `~/Library/Caches/imessage-bridge/media` (5 GB cap). Needs ffmpeg (`brew install ffmpeg`).
 
 ## Layout
 

@@ -5,6 +5,9 @@ import { ChatDb } from './chatdb/index.ts';
 import { Store } from './store.ts';
 import { Watcher } from './watcher.ts';
 import { Sender } from './sender.ts';
+import { Media } from './media.ts';
+import { homedir } from 'node:os';
+import { join } from 'node:path';
 import { buildApp } from './app.ts';
 
 const config = loadConfig();
@@ -13,9 +16,13 @@ const chatDb = new ChatDb(config.chatDbPath, contacts, config.defaultRegion);
 const store = new Store(DATA_DIR);
 const watcher = new Watcher(chatDb);
 const sender = new Sender(watcher);
+const media = new Media(chatDb, store, {
+  cacheDir: join(homedir(), 'Library/Caches/imessage-bridge/media'),
+  attachmentsRoot: join(homedir(), 'Library/Messages/Attachments'),
+});
 const clientDir = fileURLToPath(new URL('../../client/dist', import.meta.url));
 
-const app = buildApp({ config, chatDb, contacts, store, watcher, sender, clientDir });
+const app = buildApp({ config, chatDb, contacts, store, watcher, sender, media, clientDir });
 
 // Metadata only: never the text or recipient.
 sender.subscribe((status) => app.log.info({ state: status.state, error: status.error }, 'send'));

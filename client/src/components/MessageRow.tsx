@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react';
-import type { AttachmentInfo, Message } from '@imb/shared';
-import { clockTime, fileSize, sameDay, separatorTime } from '../format.ts';
+import type { Message } from '@imb/shared';
+import { clockTime, sameDay, separatorTime } from '../format.ts';
+import { AttachmentView } from './AttachmentView.tsx';
 import type { PendingSend } from '../outbox.ts';
 
 // Messages shows a timestamp separator after an hour of silence.
@@ -17,23 +18,6 @@ function status(m: Message): string {
   if (m.readAt) return `Read ${clockTime(m.readAt)}`;
   if (m.delivered) return 'Delivered';
   return 'Sent';
-}
-
-const KIND_LABEL: Record<AttachmentInfo['kind'], string> = {
-  image: 'Photo',
-  video: 'Video',
-  audio: 'Audio',
-  file: 'File',
-};
-
-function Attachment({ attachment: a }: { attachment: AttachmentInfo }) {
-  return (
-    <div className={`attachment ${a.available ? '' : 'unavailable'}`}>
-      <span className="attachment-kind">{a.isSticker ? 'Sticker' : KIND_LABEL[a.kind]}</span>
-      <span className="attachment-name sensitive">{a.name}</span>
-      <span className="attachment-size">{a.available ? fileSize(a.size) : 'Not downloaded on Mac'}</span>
-    </div>
-  );
 }
 
 export function MessageRow({
@@ -80,7 +64,7 @@ export function MessageRow({
           {replyTo ? replyTo.text || 'Attachment' : 'Reply to an earlier message'}
         </div>
       )}
-      {!m.retracted && m.attachments.map((a) => <Attachment key={a.id} attachment={a} />)}
+      {!m.retracted && m.attachments.map((a) => <AttachmentView key={a.id} attachment={a} />)}
       {body}
       {m.editedAt && !m.retracted && <div className="meta">Edited</div>}
       {showStatus && <div className="meta">{status(m)}</div>}

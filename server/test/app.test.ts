@@ -32,7 +32,8 @@ const chatDb = {
 const contacts = { count: 0 } as unknown as Contacts;
 const watcher = { subscribe: () => () => {}, lastRowId: 0 } as unknown as Watcher;
 const sender = { subscribe: () => () => {} } as unknown as Sender;
-const app = buildApp({ config, chatDb, contacts, store: new Store(dir), watcher, sender, logger: false });
+const media = { fillSizes: async () => {}, get: async () => null } as unknown as import('../src/media.ts').Media;
+const app = buildApp({ config, chatDb, contacts, store: new Store(dir), watcher, sender, media, logger: false });
 
 test('ping is public', async () => {
   const res = await app.inject({ url: '/api/ping' });

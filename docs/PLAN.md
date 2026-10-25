@@ -146,6 +146,12 @@ confirmed.
 - Cache keyed by attachment GUID with a size cap (LRU).
 - Paths come from the DB by id only and must realpath under
   `~/Library/Messages/Attachments`. Missing files → "not on this Mac" placeholder.
+- Thumbnail sizes are stored in app.db and sent with each message page so the thread
+  doesn't jump while images load (page requests wait ≤1.5 s for new thumbnails).
+- `<img>`/`<video>` can't send the device token, so media URLs carry `?t=`, an HMAC
+  token (device id + 24 h expiry, secret in app.db). It opens attachments only and
+  dies with the device. Request logs record the route, never the URL.
+- Voice messages are Opus-in-CAF; browsers can't play CAF, so they become AAC m4a.
 
 ## Security
 
@@ -188,7 +194,7 @@ confirmed.
 | M1 | Read-only viewer | Pair → conversation list with contact names → paged history (text, groups included), at the ts.net HTTPS URL. Server + client built 2026-10-26; runs from the Claude Code session until M6 gives it its own FDA grant |
 | M2 | Real-time | Watcher + WS + resume; delivered/read/edited/unsent update live; iPhone-sent messages appear without refresh. Built 2026-10-26: 37 server tests + browser E2E on a synthetic chat.db (event→screen ~25 ms after detection; resume after server restart 1.3 s, no duplicates) |
 | M3 | Send text | Optimistic send, reconciliation, failure/retry, SMS + iMessage. Built 2026-10-26: 49 server tests + browser E2E with a fake Messages.app; real iMessage send to self confirmed (request → matched chat.db row in ~1 s). AppleScript lists only loaded chats, so older 1:1 chats send via participant on the iMessage/SMS account (verified read-only). Real SMS and group sends not yet exercised |
-| M4 | Receive attachments | Inline images/thumbs, video, file download, missing-file placeholder |
+| M4 | Receive attachments | Inline images/thumbs, video, file download, missing-file placeholder. Built 2026-10-26: 65 server tests + browser E2E with generated media. Real data: thread page with 4 new thumbnails 229 ms (31 ms warm); 34 MB HEVC video → H.264 MP4 in 5.3 s first play, cached after; Opus voice message → m4a 130 ms. Found: `sips -Z` enlarges small images, so it's only applied to larger ones |
 | M5 | Send attachments | Upload → stage → send → reconcile → cleanup after delivery |
 | M6 | Tray app + service | Tauri tray app (pairing, autostart, toasts), server as LaunchAgent single binary, health page |
 | Later | | Tapbacks, inline-reply display, new conversations |
