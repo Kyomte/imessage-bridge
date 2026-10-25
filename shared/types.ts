@@ -46,6 +46,8 @@ export interface Message {
   sender: Participant | null;
   text: string;
   sentAt: number;
+  /** Messages sent from other devices are often flagged delivered with no delivery time. */
+  delivered: boolean;
   deliveredAt: number | null;
   readAt: number | null;
   editedAt: number | null;

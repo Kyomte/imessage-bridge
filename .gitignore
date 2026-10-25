@@ -3,3 +3,4 @@ node_modules/
 *.log
 spike/out/
 .DS_Store
+client/dist/

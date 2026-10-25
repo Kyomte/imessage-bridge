@@ -93,6 +93,11 @@ handle → name. Refresh on a timer or when the file changes.
    debounced ~75 ms.
 2. Backstop: `PRAGMA data_version` once a second (cheap; changes only when another
    process commits).
+
+M0 finding: in the first watcher run the incoming message was detected by the
+`data_version` poll, not FSEvents, so FSEvents may not fire for this TCC-protected
+folder. The poll is therefore required, not just a backstop; M2 confirms whether
+FSEvents adds anything (e.g. watching the folder from the FDA-granted binary).
 3. On trigger:
    - `ROWID > lastRowId` → `message.new`
    - hot-window re-scan (last ~500 rows / 24 h) of mutable fields (delivered, read,
@@ -177,7 +182,7 @@ confirmed.
 | # | Milestone | Done when |
 |---|---|---|
 | M0 | Spike (go/no-go) | (a) decoder ≥99.9% on corpus ✅ 100%; (b) text send via osascript to an `any;-;` iMessage chat and an SMS chat; (c) image send to both, staging folder found; (d) watcher fires on incoming and iPhone-sent messages, latency measured |
-| M1 | Read-only viewer | Pair → conversation list with contact names → paged history (text, groups included), at the ts.net HTTPS URL |
+| M1 | Read-only viewer | Pair → conversation list with contact names → paged history (text, groups included), at the ts.net HTTPS URL. Server + client built 2026-10-26; runs from the Claude Code session until M6 gives it its own FDA grant |
 | M2 | Real-time | Watcher + WS + resume; delivered/read/edited/unsent update live; iPhone-sent messages appear without refresh |
 | M3 | Send text | Optimistic send, reconciliation, failure/retry, SMS + iMessage |
 | M4 | Receive attachments | Inline images/thumbs, video, file download, missing-file placeholder |

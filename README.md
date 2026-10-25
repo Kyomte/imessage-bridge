@@ -6,12 +6,53 @@ decisions and milestones.
 
 ## Status
 
-M0 spike in progress (`spike/`).
+- M0 spike: decoder verified (100% vs NSUnarchiver); send tests pending.
+- M1 read-only viewer: server + web client.
+
+## Layout
+
+```
+shared/   API types used by server and client
+server/   Node 26 + Fastify; reads chat.db read-only (runs .ts directly, no build)
+client/   React + Vite; built into client/dist and served by the server
+spike/    M0 probes (decoder corpus test, watcher, osascript sends)
+```
+
+## Running (on the Mac)
+
+The process that runs the server needs **Full Disk Access** (chat.db and Contacts).
+
+```sh
+npm install
+npm run setup     # writes ~/Library/Application Support/imessage-bridge/config.json
+                  # and a pairing password into pairing-password.txt (0600) next to it
+npm run build     # builds the client into client/dist
+npm start         # http://127.0.0.1:7317 (loopback only)
+```
+
+Remote access is through Tailscale only:
+
+```sh
+tailscale serve --bg 7317   # https://<mac>.<tailnet>.ts.net → 127.0.0.1:7317
+```
+
+Open the ts.net URL on Windows, enter the pairing password, and the device gets
+its own revocable token. `npm run setup -- --rotate-password` issues a new pairing
+password; existing devices keep working until revoked (`DELETE /api/devices/:id`).
+
+Ctrl+Shift+B blurs names and message text (useful when screen sharing).
+
+## Development
+
+```sh
+npm run dev        # server with --watch + Vite dev server (proxies /api)
+npm test           # server tests, incl. an integration test against the real chat.db
+npm run typecheck
+```
 
 ## Spike scripts
 
-All scripts read `~/Library/Messages/chat.db` read-only and need Full Disk Access for
-the process that runs them. None of them print message text.
+All read `~/Library/Messages/chat.db` read-only. None print message text.
 
 ```sh
 # attributedBody decoder vs Apple's NSUnarchiver, over the whole corpus

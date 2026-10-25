@@ -68,6 +68,7 @@ interface MessageRow {
   dateNs: string;
   fromMe: number;
   sentAt: number;
+  delivered: number;
   deliveredAt: number | null;
   readAt: number | null;
   editedAt: number | null;
@@ -214,7 +215,7 @@ export class ChatDb {
     const rows = this.#db
       .prepare(
         `SELECT m.ROWID AS rowId, m.guid AS id, CAST(m.date AS TEXT) AS dateNs, m.is_from_me AS fromMe,
-                ${ms('m.date')} AS sentAt, ${ms('m.date_delivered')} AS deliveredAt,
+                ${ms('m.date')} AS sentAt, m.is_delivered AS delivered, ${ms('m.date_delivered')} AS deliveredAt,
                 ${ms('m.date_read')} AS readAt, ${ms('m.date_edited')} AS editedAt,
                 m.date_retracted > 0 AS retracted, m.text, m.attributedBody AS body, m.service,
                 m.error, m.cache_has_attachments AS hasAttachments,
@@ -250,6 +251,7 @@ export class ChatDb {
       sender: !fromMe && row.handle ? this.participant(row.handle) : null,
       text: row.retracted ? '' : messageText(row.text, row.body),
       sentAt: row.sentAt,
+      delivered: row.delivered === 1 || row.deliveredAt != null,
       deliveredAt: row.deliveredAt,
       readAt: row.readAt,
       editedAt: row.editedAt,
