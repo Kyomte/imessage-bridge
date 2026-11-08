@@ -33,30 +33,119 @@
         font-size: 13px;
         line-height: 1.45;
       }
+      input {
+        box-sizing: border-box;
+        width: 100%;
+        padding: 8px 10px;
+        border: 1px solid #8e8e9366;
+        border-radius: 8px;
+        font: inherit;
+        font-size: 14px;
+      }
+      button {
+        margin-top: 12px;
+        padding: 7px 16px;
+        border: 0;
+        border-radius: 8px;
+        background: #0a84ff;
+        color: #fff;
+        font: inherit;
+        font-size: 14px;
+      }
+      button.link {
+        background: none;
+        color: #0a84ff;
+      }
+      #error {
+        color: #ff453a;
+      }
     </style>
   </head>
   <body>
     <main>
-      <h1 style="font-size: 18px">Connecting to your Mac…</h1>
-      <p id="hint">Make sure Tailscale is connected on this PC and the Mac is awake.</p>
+      <section id="connecting" hidden>
+        <h1 style="font-size: 18px">Connecting to your Mac…</h1>
+        <p id="hint"></p>
+        <button id="change" class="link" type="button" hidden>Change address</button>
+      </section>
+      <form id="setup" hidden>
+        <h1 style="font-size: 18px">Where is your Mac?</h1>
+        <p>
+          Its Tailscale address, as set up with <code>tailscale serve</code> on the Mac, for
+          example <code>http://my-mac.my-tailnet.ts.net</code>.
+        </p>
+        <input id="address" aria-label="Your Mac's Tailscale address" autocomplete="off" spellcheck="false" placeholder="http://my-mac.my-tailnet.ts.net" />
+        <p id="error" role="alert"></p>
+        <button type="submit">Connect</button>
+      </form>
     </main>
-    <script src="config.js"></script>
     <script>
+      // The Mac's address is entered once and kept in this app's local storage, so it is
+      // never part of the build. Only *.ts.net is accepted: the bridge is reachable over
+      // Tailscale only, and remote.json grants notifications to *.ts.net only.
+      const KEY = 'imb.server';
+      const $ = (id) => document.getElementById(id);
+      let current = null; // the address connect() is working on; stale loops stop
+
+      function parseAddress(text) {
+        const raw = text.trim();
+        if (!raw) return null;
+        let url;
+        try {
+          url = new URL(/^https?:\/\//i.test(raw) ? raw : 'http://' + raw);
+        } catch {
+          return null;
+        }
+        return url.hostname.endsWith('.ts.net') ? url.origin : null;
+      }
+
+      function showSetup() {
+        current = null;
+        $('connecting').hidden = true;
+        $('setup').hidden = false;
+        $('address').value = localStorage.getItem(KEY) ?? '';
+        $('address').focus();
+      }
+
       // Open the bridge UI once the Mac answers, so a slow Tailscale start at login
       // doesn't leave an error page. no-cors: only reachability matters here.
-      const server = window.IMB_SERVER;
-      let attempts = 0;
-      async function connect() {
-        try {
-          await fetch(server + '/api/ping', { mode: 'no-cors', cache: 'no-store' });
-          location.replace(server + '/');
-        } catch {
-          attempts++;
-          if (attempts === 5) document.getElementById('hint').textContent += ' Still trying: ' + server;
-          setTimeout(connect, 3000);
+      async function connect(server) {
+        current = server;
+        $('setup').hidden = true;
+        $('connecting').hidden = false;
+        $('change').hidden = true;
+        $('hint').textContent = 'Make sure Tailscale is connected on this PC and the Mac is awake.';
+        for (let attempts = 1; current === server; attempts++) {
+          try {
+            await fetch(server + '/api/ping', { mode: 'no-cors', cache: 'no-store' });
+            if (current === server) location.replace(server + '/');
+            return;
+          } catch {
+            if (attempts === 5) {
+              $('hint').textContent += ' Still trying: ' + server;
+              $('change').hidden = false;
+            }
+            await new Promise((resolve) => setTimeout(resolve, 3000));
+          }
         }
       }
-      connect();
+
+      $('setup').addEventListener('submit', (event) => {
+        event.preventDefault();
+        const server = parseAddress($('address').value);
+        if (!server) {
+          $('error').textContent = 'Enter the Mac’s address ending in .ts.net.';
+          return;
+        }
+        $('error').textContent = '';
+        localStorage.setItem(KEY, server);
+        connect(server);
+      });
+      $('change').addEventListener('click', showSetup);
+
+      const saved = localStorage.getItem(KEY);
+      if (saved) connect(saved);
+      else showSetup();
     </script>
   </body>
 </html>

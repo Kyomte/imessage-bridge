@@ -2,8 +2,8 @@
 
 A small Tauri v2 app around the bridge web UI:
 
-- opens the UI from your Mac (`shell/config.js`), after a "Connecting to your Mac…" page
-  that waits until the Mac answers
+- opens the UI from your Mac, after a "Connecting to your Mac…" page that waits until
+  the Mac answers
 - closing the window hides it to the tray; it stays connected and shows Windows
   notifications for new messages (except the conversation you're looking at)
 - starts minimized at login (turn off in Task Manager → Startup apps); one copy only
@@ -14,9 +14,13 @@ only when `desktop/` changes.
 
 ## Server URL
 
-`shell/config.js` and `src-tauri/capabilities/remote.json` both name the Mac:
-`http://your-mac.your-tailnet.ts.net`. Change both if that changes. The capability
-lets only that URL use notifications; it gets no other native access.
+On first launch the app asks for your Mac's Tailscale address (the `tailscale serve`
+URL, e.g. `http://my-mac.my-tailnet.ts.net`) and keeps it in the app's local storage,
+so no address is built into the installer. If the Mac doesn't answer, the connecting
+page offers **Change address**.
+
+Only `*.ts.net` addresses are accepted. `src-tauri/capabilities/remote.json` lets pages
+from `*.ts.net` show notifications and gives them no other native access.
 
 ## Build on Windows
 
@@ -40,7 +44,7 @@ Mac, like the browser.
 ## Build in the cloud instead
 
 `.github/workflows/desktop-windows.yml` builds the same installer on a GitHub Windows
-runner and uploads it as an artifact, once the repo is on GitHub.
+runner and uploads it as an artifact. It contains no address, so it is safe to share.
 
 ## Develop
 

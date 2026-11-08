@@ -1,10 +1,10 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "remote-ui",
-  "description": "The bridge UI served by the Mac may show notifications, nothing else. Keep the URL in sync with shell/config.js.",
+  "description": "The bridge UI served by the Mac over Tailscale may show notifications, nothing else. The shell page only accepts *.ts.net addresses.",
   "windows": ["main"],
   "remote": {
-    "urls": ["http://your-mac.your-tailnet.ts.net/*"]
+    "urls": ["http://*.ts.net/*", "https://*.ts.net/*"]
   },
   "permissions": ["notification:default"]
 }
