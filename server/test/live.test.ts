@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import type { AddressInfo } from 'node:net';
 import { CLOSE_FORBIDDEN_ORIGIN, CLOSE_UNAUTHORIZED, type ServerEvent } from '@imb/shared';
 import { buildApp } from '../src/app.ts';
+import { Staging } from '../src/staging.ts';
 import { DEFAULTS, type Config } from '../src/config.ts';
 import { ChatDb } from '../src/chatdb/index.ts';
 import { Contacts } from '../src/contacts.ts';
@@ -33,7 +34,8 @@ const sender = new Sender(watcher, {
   },
 });
 const media = new Media(chatDb, store, { cacheDir: join(dataDir, 'cache'), attachmentsRoot: join(dataDir, 'Attachments') });
-const app = buildApp({ config, chatDb, contacts, store, watcher, sender, media, logger: false });
+const staging = new Staging(join(dataDir, 'staging'));
+const app = buildApp({ config, chatDb, contacts, store, watcher, sender, media, staging, logger: false });
 const { token } = store.createDevice('test');
 let url: string;
 

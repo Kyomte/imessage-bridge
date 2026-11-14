@@ -15,7 +15,13 @@ decisions and milestones.
 - M4 attachments: inline photos (HEIC → JPEG), stickers, videos (HEVC → H.264 on first
   play), voice messages (CAF → m4a) and file downloads. Conversions are cached in
   `~/Library/Caches/imessage-bridge/media` (5 GB cap). Needs ffmpeg (`brew install ffmpeg`).
-- M5 sending attachments: deferred, see [docs/issues/0001-send-attachments.md](docs/issues/0001-send-attachments.md).
+- M5 sending attachments: paperclip, paste or drag-and-drop in the composer; each file
+  is sent as its own message with upload progress and Retry. Files are staged under
+  `~/Library/Messages/Attachments/imessage-bridge/` and stay there after sending
+  (Messages keeps using them). See [docs/issues/0001-send-attachments.md](docs/issues/0001-send-attachments.md).
+- Seen state: opening a chat clears its unread dot on every paired device. This is the
+  bridge's own state; Messages on the Mac and the iPhone keep theirs, since Messages only
+  marks messages read for someone at the Mac.
 - M6 always-on: LaunchAgent service with its own permissions, status panel, Windows
   tray app ([desktop/](desktop/README.md)).
 
@@ -75,6 +81,10 @@ its own revocable token. `npm run setup -- --rotate-password` issues a new pairi
 password; existing devices keep working until revoked (`DELETE /api/devices/:id`).
 
 Ctrl+Shift+B blurs names and message text (useful when screen sharing).
+
+`stagingDir` in `~/Library/Application Support/imessage-bridge/config.json` moves where
+uploads wait to be sent. It must stay inside `~/Library/Messages/Attachments/`: Messages
+sends an empty message for files anywhere else.
 
 ## Development
 
