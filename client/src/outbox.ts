@@ -78,10 +78,7 @@ function fail(client: QueryClient, clientId: string, conversationId: string, err
   applySendStatus(client, { clientId, conversationId, state: 'failed', messageId: null, error: reason });
 }
 
-/** Adds the pending bubble first (status events can beat the HTTP response), then posts. */
-export async function sendText(client: QueryClient, conversationId: string, service: string, text: string) {
-  const clientId = newClientId();
-  add(client, { clientId, conversationId, text, service, progress: null });
+async function postText(client: QueryClient, conversationId: string, clientId: string, text: string) {
   try {
     await api.send(conversationId, { text, clientId });
   } catch (err) {
@@ -89,13 +86,20 @@ export async function sendText(client: QueryClient, conversationId: string, serv
   }
 }
 
+/** Adds the pending bubble first (status events can beat the HTTP response), then posts. */
+export function sendText(client: QueryClient, conversationId: string, service: string, text: string) {
+  const clientId = newClientId();
+  add(client, { clientId, conversationId, text, service, progress: null });
+  return postText(client, conversationId, clientId, text);
+}
+
 export function fileKind(file: File): AttachmentKind {
   const top = file.type.split('/')[0];
   return top === 'image' || top === 'video' || top === 'audio' ? top : 'file';
 }
 
-/** Uploads one file as its own message, with a pending row that shows progress. */
-export async function sendFile(client: QueryClient, conversationId: string, service: string, blob: File) {
+/** Adds a file's pending row (image preview or file chip); returns its clientId. */
+function addFile(client: QueryClient, conversationId: string, service: string, blob: File): string {
   const clientId = newClientId();
   const kind = fileKind(blob);
   const file: PendingFile = {
@@ -105,23 +109,59 @@ export async function sendFile(client: QueryClient, conversationId: string, serv
     kind,
     previewUrl: kind === 'image' ? URL.createObjectURL(blob) : null,
   };
-  add(client, { clientId, conversationId, text: '', file, service, progress: 0 });
+  add(client, { clientId, conversationId, text: '', file, service, progress: null });
+  return clientId;
+}
 
-  let shown = 0;
+async function upload(client: QueryClient, conversationId: string, clientId: string, blob: File) {
+  const setProgress = (progress: number | null) =>
+    edit(client, (list) => list.map((p) => (p.clientId === clientId ? { ...p, progress } : p)));
+  let shown = -1;
   const onProgress = (fraction: number) => {
     // Whole percents only, so a fast upload doesn't re-render hundreds of times.
     const percent = Math.floor(fraction * 100);
     if (percent === shown) return;
     shown = percent;
-    edit(client, (list) => list.map((p) => (p.clientId === clientId ? { ...p, progress: percent / 100 } : p)));
+    setProgress(percent / 100);
   };
+  onProgress(0);
   try {
     await api.sendAttachment(conversationId, clientId, blob, onProgress);
   } catch (err) {
     fail(client, clientId, conversationId, err);
   } finally {
-    edit(client, (list) => list.map((p) => (p.clientId === clientId ? { ...p, progress: null } : p)));
+    setProgress(null);
   }
+}
+
+/** Uploads one file as its own message, with a pending row that shows progress. */
+export function sendFile(client: QueryClient, conversationId: string, service: string, blob: File) {
+  return upload(client, conversationId, addFile(client, conversationId, service, blob), blob);
+}
+
+/**
+ * Sends each file as its own message, then the text, in that order, like Messages does.
+ * Every pending row shows at once; the uploads run one at a time, because the server
+ * queues sends in the order their requests finish.
+ */
+export async function sendAll(
+  client: QueryClient,
+  conversationId: string,
+  service: string,
+  files: File[],
+  text: string,
+) {
+  const steps = files.map((blob) => {
+    const clientId = addFile(client, conversationId, service, blob);
+    return () => upload(client, conversationId, clientId, blob);
+  });
+  if (text) {
+    const clientId = newClientId();
+    add(client, { clientId, conversationId, text, service, progress: null });
+    steps.push(() => postText(client, conversationId, clientId, text));
+  }
+  // A failed step marks its own row failed; the rest still go.
+  for (const step of steps) await step();
 }
 
 export function retry(client: QueryClient, pending: PendingSend) {

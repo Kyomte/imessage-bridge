@@ -4,7 +4,7 @@ import { Virtuoso, type VirtuosoHandle } from 'react-virtuoso';
 import { MAX_ATTACHMENT_BYTES, type ConversationSummary, type Message } from '@imb/shared';
 import { api } from '../api.ts';
 import { fileSize } from '../format.ts';
-import { removePending, retry, sendFile, sendText, useOutbox, type PendingSend } from '../outbox.ts';
+import { removePending, retry, sendAll, useOutbox, type PendingSend } from '../outbox.ts';
 import { useMarkSeen } from '../seen.ts';
 import { useConversations } from './ConversationList.tsx';
 import { Avatar } from './Avatar.tsx';
@@ -102,9 +102,7 @@ export function Thread({ conversationId, onBack }: { conversationId: string; onB
   const send = (text: string) => {
     if (!conversation) return;
     justSent.current = true;
-    // Like Messages: each file is its own message, then the text.
-    for (const file of drafts) void sendFile(queryClient, conversationId, conversation.service, file);
-    if (text) void sendText(queryClient, conversationId, conversation.service, text);
+    void sendAll(queryClient, conversationId, conversation.service, drafts, text);
     setDrafts([]);
     setNotice(null);
     requestAnimationFrame(() => virtuoso.current?.scrollToIndex({ index: 'LAST', align: 'end', behavior: 'smooth' }));
@@ -113,15 +111,18 @@ export function Thread({ conversationId, onBack }: { conversationId: string; onB
   const addFiles = (files: File[]) => {
     const tooLarge = files.filter((f) => f.size > MAX_ATTACHMENT_BYTES);
     const valid = files.filter((f) => f.size > 0 && f.size <= MAX_ATTACHMENT_BYTES);
-    const accepted = valid.slice(0, Math.max(MAX_DRAFT_FILES - drafts.length, 0));
-    setDrafts((list) => [...list, ...accepted]);
-    if (tooLarge.length) {
-      setNotice(`${tooLarge[0].name} is over ${fileSize(MAX_ATTACHMENT_BYTES)} and can't be sent.`);
-    } else if (valid.length > accepted.length) {
-      setNotice(`Up to ${MAX_DRAFT_FILES} files at a time.`);
-    } else {
-      setNotice(null);
-    }
+    // Counted inside the update, so two adds before a re-render can't pass the cap.
+    setDrafts((list) => {
+      const accepted = valid.slice(0, Math.max(MAX_DRAFT_FILES - list.length, 0));
+      if (tooLarge.length) {
+        setNotice(`${tooLarge[0].name} is over ${fileSize(MAX_ATTACHMENT_BYTES)} and can't be sent.`);
+      } else if (valid.length > accepted.length) {
+        setNotice(`Up to ${MAX_DRAFT_FILES} files at a time.`);
+      } else {
+        setNotice(null);
+      }
+      return [...list, ...accepted];
+    });
   };
 
   return (

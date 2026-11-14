@@ -9,6 +9,7 @@ import {
   SEND_FILE_SCRIPT,
   SEND_TEXT_SCRIPT,
   describeSendError,
+  OsascriptTimeout,
   type RunOsascript,
   type SendTarget,
 } from '../src/sender.ts';
@@ -185,4 +186,69 @@ test('a file send times out on its own, longer clock', async () => {
   assert.equal(seen.findLast((s) => s.clientId === 'client-0013')?.state, 'unconfirmed');
   assert.equal(sender.status('client-0013')?.state, 'unconfirmed');
   assert.equal(sender.status('never-sent'), null);
+});
+
+test('a receipt on an earlier file with the same name does not confirm a new send', async () => {
+  // Browsers name every pasted screenshot "image.png".
+  const earlier = fake.addMessage(chat.chatRowId, { text: '￼', fromMe: true });
+  fake.addAttachment(earlier, { filename: '/x/a/image.png' });
+  watcher.check();
+
+  let rowId = 0;
+  const { sender, last } = makeSender(async () => {});
+  sender.sendFile(target, { path: '/x/b/image.png', name: 'image.png' }, 'client-0014');
+  await wait();
+  fake.markDelivered(earlier);
+  watcher.check();
+  assert.equal(last('client-0014')?.state, 'sending');
+
+  rowId = fake.addMessage(chat.chatRowId, { text: '￼', fromMe: true });
+  fake.addAttachment(rowId, { filename: '/x/b/image.png' });
+  watcher.check();
+  const status = last('client-0014')!;
+  assert.equal(status.state, 'sent');
+  assert.notEqual(status.messageId, null);
+  assert.equal(sender.status('client-0014')?.messageId, status.messageId);
+});
+
+test('two sends of the same file name each get their own row', async () => {
+  const rows: number[] = [];
+  const { sender, last } = makeSender(async () => {});
+  sender.sendFile(target, { path: '/x/c/image.png', name: 'image.png' }, 'client-0015');
+  sender.sendFile(target, { path: '/x/d/image.png', name: 'image.png' }, 'client-0016');
+  await wait();
+  for (const dir of ['c', 'd']) {
+    const rowId = fake.addMessage(chat.chatRowId, { text: '￼', fromMe: true });
+    fake.addAttachment(rowId, { filename: `/x/${dir}/image.png` });
+    rows.push(rowId);
+  }
+  watcher.check();
+  // A receipt on the first row must not move either send.
+  fake.markDelivered(rows[0]);
+  watcher.check();
+  const first = last('client-0015')!;
+  const second = last('client-0016')!;
+  assert.equal(first.state, 'sent');
+  assert.equal(second.state, 'sent');
+  assert.notEqual(first.messageId, second.messageId);
+});
+
+test('an osascript timeout keeps the staged file; other failures discard it', async () => {
+  let discarded = 0;
+  const discard = () => void discarded++;
+  const timedOut = makeSender(async () => {
+    throw new OsascriptTimeout();
+  });
+  timedOut.sender.sendFile(target, { path: '/x/e.png', name: 'e.png', discard }, 'client-0017');
+  await wait();
+  assert.equal(timedOut.last('client-0017')?.state, 'failed');
+  assert.match(timedOut.last('client-0017')!.error!, /did not respond/);
+  assert.equal(discarded, 0);
+
+  const refused = makeSender(async () => {
+    throw new Error("Can't get chat id (-1728)");
+  });
+  refused.sender.sendFile(target, { path: '/x/f.png', name: 'f.png', discard }, 'client-0018');
+  await wait();
+  assert.equal(discarded, 1);
 });

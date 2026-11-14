@@ -83,10 +83,18 @@ type Job = { kind: 'text'; text: string } | ({ kind: 'file' } & FileToSend);
 const OSASCRIPT_TIMEOUT_MS = 20_000;
 const MAX_REMEMBERED = 500;
 
+/** osascript was killed at OSASCRIPT_TIMEOUT_MS: Messages may still have taken the send. */
+export class OsascriptTimeout extends Error {
+  constructor() {
+    super('osascript timed out');
+  }
+}
+
 export const runOsascript: RunOsascript = (script, args) =>
   new Promise((resolve, reject) => {
     execFile('osascript', ['-e', script, ...args], { timeout: OSASCRIPT_TIMEOUT_MS }, (err, _stdout, stderr) => {
-      if (err) reject(new Error(String(stderr || err.message).trim()));
+      if (err?.killed) reject(new OsascriptTimeout());
+      else if (err) reject(new Error(String(stderr || err.message).trim()));
       else resolve();
     });
   });
@@ -120,10 +128,13 @@ interface Awaiting {
   status: SendStatus;
   target: SendTarget;
   job: Job;
+  /** chat.db's newest rowId when the send started: its row comes after this. */
+  afterRowId: number;
   timer: NodeJS.Timeout;
 }
 
 export class Sender {
+  #watcher: Watcher;
   #run: RunOsascript;
   #confirmTimeoutMs: number;
   #fileConfirmTimeoutMs: number;
@@ -139,6 +150,7 @@ export class Sender {
     watcher: Watcher,
     { run = runOsascript, confirmTimeoutMs = 30_000, fileConfirmTimeoutMs = 120_000 } = {},
   ) {
+    this.#watcher = watcher;
     this.#run = run;
     this.#confirmTimeoutMs = confirmTimeoutMs;
     // Large files upload to iCloud before Messages writes the row.
@@ -212,20 +224,27 @@ export class Sender {
         // Wait for the row before running, in case Messages writes it before osascript returns.
         const timer = setTimeout(() => this.#expire(status), timeoutMs);
         timer.unref();
-        this.#awaiting.push({ status, target, job: awaited, timer });
+        this.#awaiting.push({ status, target, job: awaited, afterRowId: this.#watcher.lastRowId, timer });
         this.#update(status, 'sending');
         const [script, payload] = job.kind === 'text' ? [SEND_TEXT_SCRIPT, job.text] : [SEND_FILE_SCRIPT, job.path];
         try {
           await this.#run(script, [target.conversationId, payload, target.handle ?? '', target.service]);
         } catch (err) {
           this.#stopAwaiting(status);
-          if (job.kind === 'file') job.discard?.();
+          // After a timeout Messages may still send the file and point its attachment at the
+          // staged copy, so leave that to the sweep (which checks chat.db first).
+          if (job.kind === 'file' && !(err instanceof OsascriptTimeout)) job.discard?.();
           this.#update(status, 'failed', { error: describeSendError(err instanceof Error ? err.message : String(err)) });
         }
       }
     } finally {
       this.#busy = false;
     }
+  }
+
+  #claimedBy(messageId: string): SendStatus | null {
+    for (const status of this.#known.values()) if (status.messageId === messageId) return status;
+    return null;
   }
 
   #stopAwaiting(status: SendStatus) {
@@ -249,10 +268,17 @@ export class Sender {
 
       // Text rows are matched when they appear. A file's attachment can be linked after
       // its row is written, which the watcher reports as an update.
-      const match = this.#awaiting.find(
-        (a) =>
-          (event.type === 'message.new' || a.job.kind === 'file') && sameChat(a.target, message) && matches(a.job, message),
-      );
+      // Only a row written after the send started, and not one another send already claimed:
+      // receipts on an earlier "image.png" arrive as updates with the same attachment name.
+      const match =
+        this.#claimedBy(message.id) === null &&
+        this.#awaiting.find(
+          (a) =>
+            (event.type === 'message.new' || a.job.kind === 'file') &&
+            message.rowId > a.afterRowId &&
+            sameChat(a.target, message) &&
+            matches(a.job, message),
+        );
       if (match) {
         this.#stopAwaiting(match.status);
         if (message.error !== 0) this.#update(match.status, 'failed', { messageId: message.id, error: 'Not delivered.' });
