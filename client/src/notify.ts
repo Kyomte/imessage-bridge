@@ -30,11 +30,14 @@ const openConversation = () => {
   return match ? decodeURIComponent(match[1]) : null;
 };
 
+/** The page is in front, focused, and showing this conversation. */
+export const isViewing = (conversationId: string) =>
+  document.visibilityState === 'visible' && document.hasFocus() && openConversation() === conversationId;
+
 export async function notifyIncoming(client: QueryClient, message: Message) {
   const n = window.__TAURI__?.notification;
   if (!n || message.fromMe) return;
-  // Already looking at it.
-  if (document.visibilityState === 'visible' && document.hasFocus() && openConversation() === message.conversationId) return;
+  if (isViewing(message.conversationId)) return;
   if (!(await allowed(n))) return;
 
   const conversation = client

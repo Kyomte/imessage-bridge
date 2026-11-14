@@ -3,7 +3,7 @@
 import { DatabaseSync } from 'node:sqlite';
 import { existsSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { extname } from 'node:path';
+import { dirname, extname, resolve, sep } from 'node:path';
 import type {
   AttachmentInfo,
   AttachmentKind,
@@ -135,16 +135,24 @@ export interface AttachmentFile {
   available: boolean;
 }
 
+/** The bridge's own "seen up to ROWID" markers (see Store.markSeen). */
+export interface SeenMarkers {
+  readonly seenVersion: number;
+  seenJson(): string;
+}
+
 export class ChatDb {
   #db: DatabaseSync;
   #contacts: Contacts;
   #region: string;
-  #cache: { version: number; conversations: ConversationSummary[] } | null = null;
+  #seen: SeenMarkers | null;
+  #cache: { version: string; conversations: ConversationSummary[] } | null = null;
 
-  constructor(path: string, contacts: Contacts, region: string) {
+  constructor(path: string, contacts: Contacts, region: string, opts: { seen?: SeenMarkers } = {}) {
     this.#db = new DatabaseSync(path, { readOnly: true });
     this.#contacts = contacts;
     this.#region = region;
+    this.#seen = opts.seen ?? null;
   }
 
   /** Changes whenever another connection (Messages.app) commits. */
@@ -162,7 +170,8 @@ export class ChatDb {
   }
 
   listConversations(): ConversationSummary[] {
-    const version = this.dataVersion();
+    // A seen marker lives in the bridge's own database, so chat.db's data_version alone misses it.
+    const version = `${this.dataVersion()}:${this.#seen?.seenVersion ?? 0}`;
     if (this.#cache?.version === version) return this.#cache.conversations;
     const conversations = this.#queryConversations();
     this.#cache = { version, conversations };
@@ -185,8 +194,16 @@ export class ChatDb {
            SELECT chat_id, mid, ROW_NUMBER() OVER (PARTITION BY chat_id ORDER BY date DESC, mid DESC) AS rn
            FROM visible
          ),
+         seen AS (
+           SELECT key AS guid, value AS upTo FROM json_each(:seen)
+         ),
          unread AS (
-           SELECT chat_id, SUM(is_read = 0 AND is_from_me = 0) AS n FROM visible GROUP BY chat_id
+           -- Unread in Messages and newer than what the bridge has shown.
+           SELECT v.chat_id, SUM(v.is_read = 0 AND v.is_from_me = 0 AND v.mid > ifnull(s.upTo, 0)) AS n
+           FROM visible v
+           JOIN chat c2 ON c2.ROWID = v.chat_id
+           LEFT JOIN seen s ON s.guid = c2.guid
+           GROUP BY v.chat_id
          )
          SELECT c.ROWID AS chatRowId, c.guid, c.style, c.display_name AS displayName,
                 c.service_name AS service, c.chat_identifier AS identifier,
@@ -199,7 +216,7 @@ export class ChatDb {
          LEFT JOIN unread u ON u.chat_id = c.ROWID
          ORDER BY m.date DESC`,
       )
-      .all() as unknown as ConversationRow[];
+      .all({ seen: this.#seen?.seenJson() ?? '{}' }) as unknown as ConversationRow[];
 
     const handlesByChat = new Map<number, string[]>();
     const handleRows = this.#db
@@ -389,6 +406,23 @@ export class ChatDb {
       isSticker: row.isSticker === 1,
       available: isAvailable(row),
     };
+  }
+
+  /**
+   * Folders under `root` that hold a file some attachment row points at. Messages stores
+   * paths as "~/Library/…", so both that form and the absolute one are checked.
+   */
+  attachmentDirsUnder(root: string): Set<string> {
+    const absolute = resolve(root);
+    const home = homedir();
+    const tilde = absolute.startsWith(home + sep) ? `~${absolute.slice(home.length).split(sep).join('/')}` : absolute;
+    const rows = this.#db
+      .prepare(
+        `SELECT filename FROM attachment
+         WHERE substr(filename, 1, length(:absolute)) = :absolute OR substr(filename, 1, length(:tilde)) = :tilde`,
+      )
+      .all({ absolute, tilde }) as { filename: string }[];
+    return new Set(rows.map((r) => resolve(dirname(expandHome(r.filename)))));
   }
 
   #attachmentsFor(messageRowIds: number[]): Map<number, AttachmentInfo[]> {

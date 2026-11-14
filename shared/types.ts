@@ -128,6 +128,17 @@ export interface SendRequest {
   clientId: string;
 }
 
+/**
+ * POST /api/conversations/:id/attachments takes multipart form data: a `clientId` field
+ * first, then one `file`. iMessage allows about this much; SMS/MMS carriers far less.
+ */
+export const MAX_ATTACHMENT_BYTES = 100 * 1024 * 1024;
+
+/** Marks a conversation seen in the bridge up to and including this message rowId. */
+export interface ReadRequest {
+  upToRowId: number;
+}
+
 // WebSocket protocol at /api/ws. The client authenticates with its first frame,
 // because a browser WebSocket can't send an Authorization header.
 

@@ -1,38 +1,51 @@
 # M5: Send photos and files from Windows
 
-Status: open (deferred 2026-10-26, after M4)
+Status: done 2026-11-14 for iMessage. SMS/MMS sends are built the same way but not yet
+tried against a real recipient.
 
 ## Goal
 
 Pick or paste a photo/file in a Windows thread and send it through Messages, with the
 same Sending… → confirmed flow as text (M3).
 
-## Plan
+## What was built
 
-- **Upload:** `POST /api/conversations/:id/attachments` (multipart: `file`, `clientId`),
-  size cap (iMessage ~100 MB; SMS/MMS is far smaller and carrier-dependent, so warn or
-  downscale images for SMS chats). `@fastify/multipart`, streamed to disk.
-- **Staging:** Messages.app is sandboxed and only sends files it can read. Find a folder
-  that works on macOS 26 (candidates: `~/Pictures/imessage-bridge/`, a subfolder of
-  `~/Library/Messages/Attachments/`). Probe read-only first, then one real send to
-  yourself. Random file names; keep the original name for display if Messages uses it.
-- **Send:** extend `SEND_TEXT_SCRIPT` with a file variant:
-  `send (POSIX file (item 2 of argv)) to chat id …`, with the same participant fallback
-  for chats AppleScript hasn't loaded.
-- **Reconcile:** match the new `is_from_me` row by chat + attachment (`transfer_name` or
-  byte size) instead of text. Delete the staged file only after delivery is confirmed:
-  Messages copies lazily and deleting early fails the send.
-- **Client:** attach button + drag-and-drop + paste in the composer; pending bubble with
-  a local preview (`URL.createObjectURL`), progress during upload, Retry/Remove on failure.
+- **Upload:** `POST /api/conversations/:id/attachments`, multipart with a `clientId` field
+  before one `file`. Capped at 100 MB (`MAX_ATTACHMENT_BYTES`); a larger file gets 413 and
+  nothing is kept. Streamed to disk with `@fastify/multipart`. A repeated `clientId`
+  returns the existing status without staging or sending again.
+- **Staging:** `~/Library/Messages/Attachments/imessage-bridge/<random>/<original name>`
+  (`stagingDir` in config.json). The random folder keeps names unique, so the file keeps
+  the name the recipient sees.
+- **Send:** `SEND_FILE_SCRIPT` runs `send (POSIX file (item 2 of argv)) …` with the same
+  argv and participant fallback as text.
+- **Reconcile:** a fromMe row in the same chat with an attachment whose `transfer_name`
+  equals the staged name. Matched on `message.new` and `message.updated`, since the
+  attachment can be linked after the row. File sends wait up to 120 s before
+  'unconfirmed' (text: 30 s).
+- **Cleanup:** a failed osascript run deletes its folder at once. Every hour, folders
+  older than a day that no `attachment.filename` points at are deleted. Sent files are
+  never deleted (see findings).
+- **Client:** paperclip button, paste, and drag-and-drop onto the thread put files in
+  the composer as removable chips; Send sends each file as its own message, then the
+  text. The pending row shows an image preview or a file chip, upload progress, and
+  Retry/Remove on failure. Drag-and-drop in the Windows tray app needs
+  `dragDropEnabled: false` (desktop/src-tauri/tauri.conf.json), so a tray app rebuild.
 
-## Unknowns / risks
+## Findings (macOS 26.7, osascript over SSH)
 
-- Attachment sends via AppleScript are known to fail silently on some macOS versions
-  unless the file is in an allowed folder; M0 (c) never ran.
-- MMS through SMS relay may need the iPhone nearby/awake.
+- Messages only sends files from inside `~/Library/Messages/Attachments/`. From
+  `~/Pictures/…` or `$TMPDIR` the send "succeeds" but Messages writes a fromMe row with
+  no attachment: an empty message.
+- Messages doesn't copy the file: the new `attachment.filename` is the staged path. So a
+  staged file must stay after sending, or the attachment breaks on the Mac.
+- `transfer_name` is the staged file's name. `total_bytes` differs from the file's size,
+  so it isn't used for matching.
+- The attachment row was linked together with the message row in these tests.
+
+## Still open
+
+- A real SMS/MMS send. MMS through SMS relay may need the iPhone nearby and awake, and
+  carriers cap MMS far below 100 MB; if large photos fail there, downscale images for
+  SMS chats (`sips -Z`, as in media.ts).
 - HEIC from Windows is rare; JPEG/PNG/MP4/PDF are the realistic inputs.
-
-## Done when
-
-A photo and a PDF sent from Windows arrive in an iMessage chat and an SMS chat, show as
-sent, and the staging folder is cleaned up afterwards.

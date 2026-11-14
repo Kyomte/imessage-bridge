@@ -4,6 +4,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { buildApp } from '../src/app.ts';
+import { Staging } from '../src/staging.ts';
 import { DEFAULTS, type Config } from '../src/config.ts';
 import { hashPassword } from '../src/passwords.ts';
 import { Store } from '../src/store.ts';
@@ -33,7 +34,8 @@ const contacts = { count: 0 } as unknown as Contacts;
 const watcher = { subscribe: () => () => {}, lastRowId: 0 } as unknown as Watcher;
 const sender = { subscribe: () => () => {} } as unknown as Sender;
 const media = { fillSizes: async () => {}, get: async () => null } as unknown as import('../src/media.ts').Media;
-const app = buildApp({ config, chatDb, contacts, store: new Store(dir), watcher, sender, media, logger: false });
+const staging = new Staging(join(dir, 'staging'));
+const app = buildApp({ config, chatDb, contacts, store: new Store(dir), watcher, sender, media, staging, logger: false });
 
 test('ping is public', async () => {
   const res = await app.inject({ url: '/api/ping' });
