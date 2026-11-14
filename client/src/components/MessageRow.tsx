@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react';
 import type { Message } from '@imb/shared';
-import { clockTime, sameDay, separatorTime } from '../format.ts';
-import { AttachmentView } from './AttachmentView.tsx';
+import { clockTime, fileSize, sameDay, separatorTime } from '../format.ts';
+import { AttachmentView, KIND_LABEL } from './AttachmentView.tsx';
 import type { PendingSend } from '../outbox.ts';
 
 // Messages shows a timestamp separator after an hour of silence.
@@ -93,11 +93,27 @@ export function PendingRow({
   const tone = pending.service === 'iMessage' ? 'imessage' : 'sms';
   const failed = pending.state === 'failed';
   const inFlight = pending.state === 'queued' || pending.state === 'sending';
+  const { file, progress } = pending;
+  const uploading = progress !== null && !failed;
+  const look = `${inFlight ? 'pending' : ''} ${failed ? 'failed' : ''}`;
   return (
     <div className="message-row from-me run-start run-end">
-      <div className={`bubble ${tone} sensitive ${inFlight ? 'pending' : ''} ${failed ? 'failed' : ''}`}>{pending.text}</div>
+      {file?.previewUrl ? (
+        <img className={`pending-image sensitive ${look}`} src={file.previewUrl} alt={file.name} />
+      ) : file ? (
+        <div className={`attachment ${look}`}>
+          <span className="attachment-kind">{KIND_LABEL[file.kind]}</span>
+          <span className="attachment-name sensitive">{file.name}</span>
+          <span className="attachment-size">{fileSize(file.size)}</span>
+        </div>
+      ) : (
+        <div className={`bubble ${tone} sensitive ${look}`}>{pending.text}</div>
+      )}
+      {uploading && (
+        <progress className="upload-progress" max={1} value={progress} aria-label={`Uploading ${file?.name ?? ''}`} />
+      )}
       <div className={`meta ${failed ? 'error' : ''}`} role={failed ? 'alert' : undefined}>
-        {PENDING_LABEL[pending.state]}
+        {uploading ? `Uploading ${Math.round(progress * 100)}%` : PENDING_LABEL[pending.state]}
         {failed && pending.error && pending.error !== 'Not delivered.' ? ` · ${pending.error}` : ''}
       </div>
       {failed && (

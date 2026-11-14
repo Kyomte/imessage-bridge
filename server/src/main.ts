@@ -5,10 +5,11 @@ import { fileURLToPath } from 'node:url';
 import type { FastifyServerOptions } from 'fastify';
 import { DATA_DIR, loadConfig } from './config.ts';
 import { Contacts } from './contacts.ts';
-import { ChatDb } from './chatdb/index.ts';
+import { ChatDb, expandHome } from './chatdb/index.ts';
 import { Store } from './store.ts';
 import { Watcher } from './watcher.ts';
 import { Sender } from './sender.ts';
+import { Staging } from './staging.ts';
 import { Media } from './media.ts';
 import { AutomationCheck } from './automation.ts';
 import { RotatingLog } from './logs.ts';
@@ -40,8 +41,8 @@ if (!canRead(config.chatDbPath)) {
   }, 5000);
 } else {
   const contacts = new Contacts(config.addressBookDir, config.defaultRegion);
-  const chatDb = new ChatDb(config.chatDbPath, contacts, config.defaultRegion);
   const store = new Store(DATA_DIR);
+  const chatDb = new ChatDb(config.chatDbPath, contacts, config.defaultRegion, { seen: store });
   const watcher = new Watcher(chatDb);
   const sender = new Sender(watcher);
   const automation = new AutomationCheck();
@@ -49,8 +50,22 @@ if (!canRead(config.chatDbPath)) {
     cacheDir: join(homedir(), 'Library/Caches/imessage-bridge/media'),
     attachmentsRoot: join(homedir(), 'Library/Messages/Attachments'),
   });
+  const staging = new Staging(expandHome(config.stagingDir));
 
-  const app = buildApp({ config, chatDb, contacts, store, watcher, sender, media, automation, clientDir, logger });
+  const app = buildApp({ config, chatDb, contacts, store, watcher, sender, media, staging, automation, clientDir, logger });
+
+  // Uploads that never became a message (failed, or no row showed up) are deleted after a day.
+  // Sent files stay: their chat.db attachment points at the staged file.
+  const sweepStaging = () => {
+    try {
+      const removed = staging.sweep(chatDb.attachmentDirsUnder(staging.root));
+      if (removed) app.log.info({ removed }, 'staging sweep');
+    } catch {
+      app.log.warn('staging sweep failed');
+    }
+  };
+  sweepStaging();
+  setInterval(sweepStaging, 60 * 60_000).unref();
 
   // Metadata only: never the text or recipient.
   sender.subscribe((status) => app.log.info({ state: status.state, error: status.error }, 'send'));

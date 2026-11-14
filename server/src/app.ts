@@ -1,10 +1,20 @@
 import Fastify, { LogController, type FastifyInstance } from 'fastify';
+import fastifyMultipart from '@fastify/multipart';
 import fastifyStatic from '@fastify/static';
 import { execFileSync } from 'node:child_process';
-import { existsSync, readFileSync } from 'node:fs';
+import { createWriteStream, existsSync, readFileSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
-import type { Health, MediaToken, PairResponse, SendRequest } from '@imb/shared';
+import { pipeline } from 'node:stream/promises';
+import {
+  MAX_ATTACHMENT_BYTES,
+  type ConversationSummary,
+  type Health,
+  type MediaToken,
+  type PairResponse,
+  type ReadRequest,
+  type SendRequest,
+} from '@imb/shared';
 import type { FastifyServerOptions } from 'fastify';
 import type { AutomationCheck } from './automation.ts';
 import type { Config } from './config.ts';
@@ -12,7 +22,8 @@ import type { ChatDb } from './chatdb/index.ts';
 import type { Contacts } from './contacts.ts';
 import type { Device, Store } from './store.ts';
 import type { Watcher } from './watcher.ts';
-import type { Sender } from './sender.ts';
+import type { Sender, SendTarget } from './sender.ts';
+import type { Staging } from './staging.ts';
 import { VARIANTS, type Media, type Variant } from './media.ts';
 import { verifyPassword } from './passwords.ts';
 import { registerLive } from './live.ts';
@@ -30,6 +41,8 @@ const PAIR_MAX_FAILURES = 5;
 const MAX_TEXT_LENGTH = 4000;
 const MEDIA_ROUTE = '/api/attachments/:id/:variant';
 const SENDS_PER_MINUTE = 30;
+const READS_PER_MINUTE = 120;
+const CLIENT_ID = /^[\w-]{8,64}$/;
 
 export interface AppDeps {
   config: Config;
@@ -39,9 +52,12 @@ export interface AppDeps {
   watcher: Watcher;
   sender: Sender;
   media: Media;
+  staging: Staging;
   automation?: AutomationCheck;
   clientDir?: string;
   logger?: FastifyServerOptions['logger'];
+  /** Upload size cap; tests lower it. */
+  maxAttachmentBytes?: number;
 }
 
 export function buildApp({
@@ -52,12 +68,15 @@ export function buildApp({
   watcher,
   sender,
   media,
+  staging,
   automation,
   clientDir,
   logger = true,
+  maxAttachmentBytes = MAX_ATTACHMENT_BYTES,
 }: AppDeps): FastifyInstance {
   // Request logging is our own (below) so URLs, which contain phone numbers, never hit the log.
   const app = Fastify({ logger, logController: new LogController({ disableRequestLogging: true }) });
+  app.register(fastifyMultipart);
 
   app.addHook('onResponse', async (req, reply) => {
     req.log.info(
@@ -177,6 +196,28 @@ export function buildApp({
     },
   );
 
+  // Opening a chat marks it seen in the bridge. Messages.app can't be told to mark it read
+  // (only a person at the Mac can), so the Mac and iPhone keep their own unread state.
+  const recentReads: number[] = [];
+  app.post<{ Params: { id: string }; Body: Partial<ReadRequest> }>(
+    '/api/conversations/:id/read',
+    async (req, reply) => {
+      const conversation = chatDb.getConversation(req.params.id);
+      if (!conversation) return reply.code(404).send({ error: 'not found' });
+      const upTo = req.body?.upToRowId;
+      if (typeof upTo !== 'number' || !Number.isSafeInteger(upTo) || upTo < 1 || upTo > (chatDb.lastRowId() ?? 0)) {
+        return reply.code(400).send({ error: 'upToRowId must be a message rowId' });
+      }
+      if (!allow(recentReads, READS_PER_MINUTE)) return reply.code(429).send({ error: 'too many requests' });
+
+      if (!store.markSeen(conversation.id, upTo)) return conversation;
+      const updated = chatDb.getConversation(conversation.id) ?? conversation;
+      // The watcher only diffs on chat.db changes, so tell every device here.
+      live.broadcast({ type: 'conversation.updated', conversation: updated });
+      return updated;
+    },
+  );
+
   app.get('/api/media-token', async (req): Promise<MediaToken> => store.createMediaToken(req.device!.id));
 
   app.get<{ Params: { id: string; variant: string }; Querystring: { download?: string } }>(
@@ -211,28 +252,68 @@ export function buildApp({
       if (!text || text.length > MAX_TEXT_LENGTH) {
         return reply.code(400).send({ error: `text is required (max ${MAX_TEXT_LENGTH} characters)` });
       }
-      if (typeof clientId !== 'string' || !/^[\w-]{8,64}$/.test(clientId)) {
+      if (typeof clientId !== 'string' || !CLIENT_ID.test(clientId)) {
         return reply.code(400).send({ error: 'clientId is required' });
       }
 
       // Guards against a client bug sending in a loop.
-      const now = Date.now();
-      while (recentSends.length && now - recentSends[0] > 60_000) recentSends.shift();
-      if (recentSends.length >= SENDS_PER_MINUTE) return reply.code(429).send({ error: 'too many sends' });
-      recentSends.push(now);
+      if (!allow(recentSends, SENDS_PER_MINUTE)) return reply.code(429).send({ error: 'too many sends' });
 
-      const status = sender.send(
-        {
-          conversationId: conversation.id,
-          handle: conversation.isGroup ? null : (conversation.participants[0]?.handle ?? null),
-          service: conversation.service,
-        },
-        text,
-        clientId,
-      );
+      const status = sender.send(sendTarget(conversation), text, clientId);
       return reply.code(202).send(status);
     },
   );
+
+  // Multipart: a `clientId` field, then one `file`. The file is streamed into the
+  // staging folder (see staging.ts) and sent from there.
+  app.post<{ Params: { id: string } }>('/api/conversations/:id/attachments', async (req, reply) => {
+    const conversation = chatDb.getConversation(req.params.id);
+    if (!conversation) return reply.code(404).send({ error: 'not found' });
+    if (!req.isMultipart()) return reply.code(400).send({ error: 'expected multipart form data' });
+
+    const part = await req.file({ limits: { fileSize: maxAttachmentBytes, files: 1, fields: 4, parts: 5 } });
+    if (!part) return reply.code(400).send({ error: 'file is required' });
+    const field = part.fields.clientId;
+    const clientId = field && !Array.isArray(field) && field.type === 'field' ? field.value : undefined;
+    const reject = (code: number, error: string) => {
+      part.file.resume(); // Drain what's left so the connection can be reused.
+      return reply.code(code).send({ error });
+    };
+    if (typeof clientId !== 'string' || !CLIENT_ID.test(clientId)) {
+      return reject(400, 'clientId is required (before the file)');
+    }
+    // A retried upload of a send that's already known: don't stage or send it again.
+    const existing = sender.status(clientId);
+    if (existing) {
+      part.file.resume();
+      return reply.code(202).send(existing);
+    }
+    if (!allow(recentSends, SENDS_PER_MINUTE)) return reject(429, 'too many sends');
+
+    const staged = staging.create(part.filename || 'attachment');
+    try {
+      await pipeline(part.file, createWriteStream(staged.path, { mode: 0o600 }));
+    } catch (err) {
+      staging.remove(staged.dir);
+      throw err;
+    }
+    // At the size limit busboy stops the stream early and marks it truncated.
+    if (part.file.truncated) {
+      staging.remove(staged.dir);
+      return reply.code(413).send({ error: `file is larger than ${Math.round(maxAttachmentBytes / 1024 / 1024)} MB` });
+    }
+    if (statSync(staged.path).size === 0) {
+      staging.remove(staged.dir);
+      return reply.code(400).send({ error: 'file is empty' });
+    }
+
+    const status = sender.sendFile(
+      sendTarget(conversation),
+      { path: staged.path, name: staged.name, discard: () => staging.remove(staged.dir) },
+      clientId,
+    );
+    return reply.code(202).send(status);
+  });
 
   // Always registered for reply.sendFile (attachments); it serves files only with a client build.
   const serveClient = !!clientDir && existsSync(clientDir);
@@ -245,6 +326,22 @@ export function buildApp({
   }
 
   return app;
+}
+
+/** Sliding one-minute window: false once `max` requests are already in it. */
+function allow(window: number[], max: number, now = Date.now()): boolean {
+  while (window.length && now - window[0] > 60_000) window.shift();
+  if (window.length >= max) return false;
+  window.push(now);
+  return true;
+}
+
+function sendTarget(conversation: ConversationSummary): SendTarget {
+  return {
+    conversationId: conversation.id,
+    handle: conversation.isGroup ? null : (conversation.participants[0]?.handle ?? null),
+    service: conversation.service,
+  };
 }
 
 function contentDisposition(name: string): string {

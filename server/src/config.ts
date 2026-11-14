@@ -18,12 +18,18 @@ export interface Config {
   addressBookDir: string;
   /** Extra origins allowed to open the live socket, e.g. the Tauri app's. */
   allowedOrigins?: string[];
+  /**
+   * Where uploaded attachments wait to be sent. Must be inside ~/Library/Messages/Attachments:
+   * Messages won't send files from elsewhere (see staging.ts).
+   */
+  stagingDir: string;
 }
 
 export const DEFAULTS = {
   port: 7317,
   chatDbPath: join(homedir(), 'Library/Messages/chat.db'),
   addressBookDir: join(homedir(), 'Library/Application Support/AddressBook'),
+  stagingDir: join(homedir(), 'Library/Messages/Attachments/imessage-bridge'),
 };
 
 export function loadConfig(): Config {

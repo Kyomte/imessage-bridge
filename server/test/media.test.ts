@@ -8,6 +8,7 @@ import { Contacts } from '../src/contacts.ts';
 import { Media, pickStreams } from '../src/media.ts';
 import { Store } from '../src/store.ts';
 import { buildApp } from '../src/app.ts';
+import { Staging } from '../src/staging.ts';
 import { DEFAULTS } from '../src/config.ts';
 import { hashPassword } from '../src/passwords.ts';
 import { Watcher } from '../src/watcher.ts';
@@ -158,7 +159,8 @@ test('attachment route: media tokens, downloads and ranges', { skip }, async () 
   const watcher = new Watcher(chatDb);
   const sender = new Sender(watcher, { run: async () => {} });
   const config = { ...DEFAULTS, passwordHash: hashPassword('x'), tailscaleLogin: null, defaultRegion: 'PH' };
-  const app = buildApp({ config, chatDb, contacts, store, watcher, sender, media, logger: false });
+  const staging = new Staging(join(dir, 'staging'));
+  const app = buildApp({ config, chatDb, contacts, store, watcher, sender, media, staging, logger: false });
   const { token, device } = store.createDevice('media-test');
   try {
     const get = (url: string, headers: Record<string, string> = {}) => app.inject({ url, headers });

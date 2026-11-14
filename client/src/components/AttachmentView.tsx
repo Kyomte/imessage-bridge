@@ -8,7 +8,7 @@ const THUMB_MAX_W = 260;
 const THUMB_MAX_H = 320;
 const STICKER_MAX = 140;
 
-const KIND_LABEL: Record<AttachmentInfo['kind'], string> = {
+export const KIND_LABEL: Record<AttachmentInfo['kind'], string> = {
   image: 'Photo',
   video: 'Video',
   audio: 'Audio',

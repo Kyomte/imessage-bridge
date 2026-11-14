@@ -607,6 +607,32 @@ a.attachment:hover {
   gap: 6px;
 }
 
+.attachment.pending,
+.pending-image.pending {
+  opacity: 0.6;
+}
+
+.attachment.failed,
+.pending-image.failed {
+  outline: 2px solid var(--error);
+  outline-offset: 1px;
+}
+
+.pending-image {
+  display: block;
+  max-width: min(72%, 260px);
+  max-height: 320px;
+  border-radius: 14px;
+  object-fit: cover;
+}
+
+.upload-progress {
+  width: min(60%, 200px);
+  height: 4px;
+  margin: 2px 6px 0;
+  accent-color: var(--accent);
+}
+
 .pending-actions button {
   padding: 3px 10px;
   border: 1px solid var(--border);
@@ -628,6 +654,85 @@ a.attachment:hover {
   gap: 8px;
   padding: 8px 12px 12px;
   border-top: 1px solid var(--border);
+}
+
+.composer-input {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.composer-notice {
+  color: var(--error);
+  font-size: 12px;
+}
+
+.draft-files {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.draft-file {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  padding: 4px 4px 4px 10px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  font-size: 12px;
+}
+
+.draft-file-name {
+  min-width: 0;
+  max-width: 180px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.draft-file button {
+  display: grid;
+  width: 20px;
+  height: 20px;
+  place-items: center;
+  border: none;
+  border-radius: 50%;
+  background: var(--hover);
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.attach-button {
+  display: grid;
+  flex-shrink: 0;
+  width: 30px;
+  height: 30px;
+  margin-bottom: 2px;
+  place-items: center;
+  border: none;
+  border-radius: 50%;
+  background: none;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.attach-button:hover {
+  background: var(--hover);
+  color: var(--text);
+}
+
+.thread.drop-target {
+  outline: 2px dashed var(--accent);
+  outline-offset: -6px;
 }
 
 .composer textarea {

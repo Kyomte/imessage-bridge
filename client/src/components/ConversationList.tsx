@@ -84,7 +84,7 @@ export function ConversationList({
             className={`conversation ${c.id === selectedId ? 'selected' : ''}`}
             onClick={() => onSelect(c.id)}
           >
-            {/* The bridge can't mark messages read on the Mac, so just hide the dot for the open chat. */}
+            {/* The open chat is marked seen after a moment (seen.ts); hide its dot straight away. */}
             {c.unreadCount > 0 && c.id !== selectedId && (
               <span className="unread-dot" aria-label={`${c.unreadCount} unread`} />
             )}

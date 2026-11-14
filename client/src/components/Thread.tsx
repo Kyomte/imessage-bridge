@@ -1,9 +1,11 @@
-import { useEffect, useMemo, useRef } from 'react';
+import { useEffect, useMemo, useRef, useState, type DragEvent } from 'react';
 import { useInfiniteQuery, useQueryClient } from '@tanstack/react-query';
 import { Virtuoso, type VirtuosoHandle } from 'react-virtuoso';
-import type { ConversationSummary, Message } from '@imb/shared';
+import { MAX_ATTACHMENT_BYTES, type ConversationSummary, type Message } from '@imb/shared';
 import { api } from '../api.ts';
-import { removePending, retry, sendText, useOutbox, type PendingSend } from '../outbox.ts';
+import { fileSize } from '../format.ts';
+import { removePending, retry, sendFile, sendText, useOutbox, type PendingSend } from '../outbox.ts';
+import { useMarkSeen } from '../seen.ts';
 import { useConversations } from './ConversationList.tsx';
 import { Avatar } from './Avatar.tsx';
 import { MessageRow, PendingRow } from './MessageRow.tsx';
@@ -11,6 +13,10 @@ import { Composer } from './Composer.tsx';
 
 // Virtuoso prepends by lowering firstItemIndex, so start high.
 const START_INDEX = 1_000_000;
+/** Files waiting in the composer; the server allows 30 sends a minute. */
+const MAX_DRAFT_FILES = 10;
+
+const hasFiles = (e: DragEvent) => e.dataTransfer.types.includes('Files');
 
 type Item = { kind: 'message'; message: Message } | { kind: 'pending'; pending: PendingSend };
 
@@ -43,6 +49,9 @@ export function Thread({ conversationId, onBack }: { conversationId: string; onB
   const virtuoso = useRef<VirtuosoHandle>(null);
   const justSent = useRef(false);
   const atBottom = useRef(true);
+  const [drafts, setDrafts] = useState<File[]>([]);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [dragging, setDragging] = useState(false);
 
   const query = useInfiniteQuery({
     queryKey: ['messages', conversationId],
@@ -62,6 +71,9 @@ export function Thread({ conversationId, onBack }: { conversationId: string; onB
   );
   const byId = useMemo(() => new Map(messages.map((m) => [m.id, m])), [messages]);
   const lastSentId = useMemo(() => messages.findLast((m) => m.fromMe)?.id, [messages]);
+  // rowIds grow in the order Messages writes rows, which isn't always date order.
+  const newestRowId = useMemo(() => messages.reduce((n, m) => Math.max(n, m.rowId), 0), [messages]);
+  useMarkSeen(conversationId, conversation?.unreadCount ?? 0, newestRowId);
   const items = useMemo<Item[]>(
     () => [
       ...messages.map((message) => ({ kind: 'message' as const, message })),
@@ -90,12 +102,48 @@ export function Thread({ conversationId, onBack }: { conversationId: string; onB
   const send = (text: string) => {
     if (!conversation) return;
     justSent.current = true;
-    void sendText(queryClient, conversationId, conversation.service, text);
+    // Like Messages: each file is its own message, then the text.
+    for (const file of drafts) void sendFile(queryClient, conversationId, conversation.service, file);
+    if (text) void sendText(queryClient, conversationId, conversation.service, text);
+    setDrafts([]);
+    setNotice(null);
     requestAnimationFrame(() => virtuoso.current?.scrollToIndex({ index: 'LAST', align: 'end', behavior: 'smooth' }));
   };
 
+  const addFiles = (files: File[]) => {
+    const tooLarge = files.filter((f) => f.size > MAX_ATTACHMENT_BYTES);
+    const valid = files.filter((f) => f.size > 0 && f.size <= MAX_ATTACHMENT_BYTES);
+    const accepted = valid.slice(0, Math.max(MAX_DRAFT_FILES - drafts.length, 0));
+    setDrafts((list) => [...list, ...accepted]);
+    if (tooLarge.length) {
+      setNotice(`${tooLarge[0].name} is over ${fileSize(MAX_ATTACHMENT_BYTES)} and can't be sent.`);
+    } else if (valid.length > accepted.length) {
+      setNotice(`Up to ${MAX_DRAFT_FILES} files at a time.`);
+    } else {
+      setNotice(null);
+    }
+  };
+
   return (
-    <section className="thread">
+    <section
+      className={`thread ${dragging ? 'drop-target' : ''}`}
+      onDragOver={(e) => {
+        if (!hasFiles(e) || !conversation) return;
+        e.preventDefault();
+        e.dataTransfer.dropEffect = 'copy';
+        setDragging(true);
+      }}
+      onDragLeave={(e) => {
+        // Moving onto a child also fires dragleave; only count leaving the thread.
+        if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setDragging(false);
+      }}
+      onDrop={(e) => {
+        if (!hasFiles(e)) return;
+        e.preventDefault();
+        setDragging(false);
+        if (conversation) addFiles(Array.from(e.dataTransfer.files));
+      }}
+    >
       <header className="thread-header">
         <button className="back" onClick={onBack} aria-label="Back to conversations">
           ‹
@@ -163,7 +211,16 @@ export function Thread({ conversationId, onBack }: { conversationId: string; onB
           }}
         />
       )}
-      {conversation && <Composer service={conversation.service} onSend={send} />}
+      {conversation && (
+        <Composer
+          service={conversation.service}
+          files={drafts}
+          notice={notice}
+          onAddFiles={addFiles}
+          onRemoveFile={(index) => setDrafts((list) => list.filter((_, i) => i !== index))}
+          onSend={send}
+        />
+      )}
     </section>
   );
 }

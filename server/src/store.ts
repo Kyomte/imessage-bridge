@@ -39,7 +39,42 @@ export class Store {
         width INTEGER NOT NULL,
         height INTEGER NOT NULL
       );
+      CREATE TABLE IF NOT EXISTS seen (
+        chat_guid TEXT PRIMARY KEY,
+        up_to_row_id INTEGER NOT NULL,
+        at INTEGER NOT NULL
+      );
     `);
+  }
+
+  /** Bumped whenever a seen marker moves, so cached unread counts can be recomputed. */
+  seenVersion = 0;
+
+  /**
+   * Marks a conversation seen up to a chat.db message ROWID. Messages.app can't be told
+   * to mark it read, so the bridge keeps its own marker; it only ever moves forward.
+   * Returns whether it moved.
+   */
+  markSeen(chatGuid: string, upToRowId: number, now = Date.now()): boolean {
+    const { changes } = this.#db
+      .prepare(
+        `INSERT INTO seen (chat_guid, up_to_row_id, at) VALUES (?, ?, ?)
+         ON CONFLICT (chat_guid) DO UPDATE SET up_to_row_id = excluded.up_to_row_id, at = excluded.at
+         WHERE excluded.up_to_row_id > seen.up_to_row_id`,
+      )
+      .run(chatGuid, upToRowId, now);
+    const moved = Number(changes) > 0;
+    if (moved) this.seenVersion++;
+    return moved;
+  }
+
+  /** {"<chat guid>": upToRowId, …} for chat.db's json_each(). */
+  seenJson(): string {
+    const rows = this.#db.prepare('SELECT chat_guid AS guid, up_to_row_id AS upTo FROM seen').all() as {
+      guid: string;
+      upTo: number;
+    }[];
+    return JSON.stringify(Object.fromEntries(rows.map((r) => [r.guid, r.upTo])));
   }
 
   #setting(key: string, create: () => string): string {

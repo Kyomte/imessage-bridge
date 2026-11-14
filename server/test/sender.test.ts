@@ -4,7 +4,14 @@ import type { SendStatus } from '@imb/shared';
 import { ChatDb } from '../src/chatdb/index.ts';
 import { Contacts } from '../src/contacts.ts';
 import { Watcher } from '../src/watcher.ts';
-import { Sender, SEND_TEXT_SCRIPT, describeSendError, type RunOsascript, type SendTarget } from '../src/sender.ts';
+import {
+  Sender,
+  SEND_FILE_SCRIPT,
+  SEND_TEXT_SCRIPT,
+  describeSendError,
+  type RunOsascript,
+  type SendTarget,
+} from '../src/sender.ts';
 import { FakeChatDb } from './fixtures/fake-chatdb.ts';
 
 const HANDLE = '+639171234567';
@@ -153,4 +160,29 @@ test('describeSendError maps common osascript errors', () => {
   assert.match(describeSendError("Can't get chat id \"x\". (-1728)"), /could not find/);
   assert.match(describeSendError('Command failed: SIGTERM'), /did not respond/);
   assert.match(describeSendError('weird'), /could not send/);
+});
+
+test('a file send passes its path as argv, never in the script', async () => {
+  const calls: { script: string; args: string[] }[] = [];
+  const { sender } = makeSender(async (script, args) => {
+    calls.push({ script, args });
+  });
+  const tricky = '/tmp/say "hi" & end tell -- ¬.png';
+  sender.sendFile(target, { path: tricky, name: 'x.png' }, 'client-0012');
+  await wait();
+  assert.deepEqual(calls, [{ script: SEND_FILE_SCRIPT, args: [chat.guid, tricky, HANDLE, 'SMS'] }]);
+  assert.ok(!SEND_FILE_SCRIPT.includes(tricky));
+});
+
+test('a file send times out on its own, longer clock', async () => {
+  const sender = new Sender(watcher, { run: async () => {}, confirmTimeoutMs: 10, fileConfirmTimeoutMs: 80 });
+  const seen: SendStatus[] = [];
+  sender.subscribe((s) => seen.push(s));
+  sender.sendFile(target, { path: '/x/y.png', name: 'y.png' }, 'client-0013');
+  await wait(40);
+  assert.equal(seen.findLast((s) => s.clientId === 'client-0013')?.state, 'sending');
+  await wait(80);
+  assert.equal(seen.findLast((s) => s.clientId === 'client-0013')?.state, 'unconfirmed');
+  assert.equal(sender.status('client-0013')?.state, 'unconfirmed');
+  assert.equal(sender.status('never-sent'), null);
 });

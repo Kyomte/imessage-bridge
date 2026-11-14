@@ -6,6 +6,7 @@ import {
   type MediaToken,
   type MessagePage,
   type PairResponse,
+  type ReadRequest,
   type SendRequest,
   type SendStatus,
 } from '@imb/shared';
@@ -39,24 +40,63 @@ export class ApiError extends Error {
   }
 }
 
+/** Shared handling for a failed response: sign out on 401, explain missing Full Disk Access. */
+function failure(status: number, body: { error?: string }, token: string | null, statusText: string): ApiError {
+  if (status === 401 && token) {
+    setToken(null);
+    window.dispatchEvent(new Event('imb:unauthorized'));
+  }
+  if (status === 503 && body.error === NEEDS_FULL_DISK_ACCESS) {
+    window.dispatchEvent(new Event('imb:needs-full-disk-access'));
+  }
+  return new ApiError(status, body.error ?? statusText);
+}
+
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   const token = getToken();
   const headers: Record<string, string> = {};
   if (init.body) headers['content-type'] = 'application/json';
   if (token) headers.authorization = `Bearer ${token}`;
   const res = await fetch(BASE + path, { ...init, headers });
-  if (res.status === 401 && token) {
-    setToken(null);
-    window.dispatchEvent(new Event('imb:unauthorized'));
-  }
-  if (!res.ok) {
-    const body = await res.json().catch(() => ({}));
-    if (res.status === 503 && body.error === NEEDS_FULL_DISK_ACCESS) {
-      window.dispatchEvent(new Event('imb:needs-full-disk-access'));
-    }
-    throw new ApiError(res.status, body.error ?? res.statusText);
-  }
+  if (!res.ok) throw failure(res.status, await res.json().catch(() => ({})), token, res.statusText);
   return res.json() as Promise<T>;
+}
+
+/**
+ * Uploads one file to send. XMLHttpRequest rather than fetch, because fetch can't
+ * report upload progress. `clientId` goes first: the server reads fields before the file.
+ */
+function uploadAttachment(
+  conversationId: string,
+  clientId: string,
+  file: File,
+  onProgress: (fraction: number) => void,
+): Promise<SendStatus> {
+  return new Promise((resolve, reject) => {
+    const token = getToken();
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', `${BASE}/api/conversations/${encodeURIComponent(conversationId)}/attachments`);
+    if (token) xhr.setRequestHeader('authorization', `Bearer ${token}`);
+    xhr.upload.onprogress = (e) => {
+      if (e.lengthComputable) onProgress(e.loaded / e.total);
+    };
+    xhr.onload = () => {
+      let body: { error?: string } = {};
+      try {
+        body = JSON.parse(xhr.responseText);
+      } catch {
+        // Not JSON (e.g. a proxy error page).
+      }
+      if (xhr.status >= 200 && xhr.status < 300) return resolve(body as SendStatus);
+      if (xhr.status === 413) body = { error: 'This file is too large to send.' };
+      reject(failure(xhr.status, body, token, xhr.statusText));
+    };
+    xhr.onerror = () => reject(new Error("Couldn't reach the Mac."));
+    const form = new FormData();
+    form.append('clientId', clientId);
+    form.append('file', file, file.name);
+    xhr.send(form);
+  });
 }
 
 export const api = {
@@ -86,6 +126,14 @@ export const api = {
 
   send: (conversationId: string, body: SendRequest) =>
     request<SendStatus>(`/api/conversations/${encodeURIComponent(conversationId)}/messages`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+
+  sendAttachment: uploadAttachment,
+
+  markRead: (conversationId: string, body: ReadRequest) =>
+    request<ConversationSummary>(`/api/conversations/${encodeURIComponent(conversationId)}/read`, {
       method: 'POST',
       body: JSON.stringify(body),
     }),
